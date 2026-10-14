@@ -14,14 +14,15 @@
 - `.env.example` is committed. `.env.local` stays ignored.
 - Fixed `NEXT_PUBLIC_SUPABASE_URL` in `.env.local`: it ended in `/rest/v1/`, which made every auth call 404.
 - Confirmation-link errors reach `/login` as a code (`lib/auth-link-errors.ts`) shown in our own wording; raw query text is never shown. Sign-up shows the same neutral message when the email is taken. The proxy allows exactly `/login` and paths under `/auth/`.
+- Supabase dashboard: Site URL and the `/auth/confirm` redirect URLs are set (done).
 
 ## Decisions
 - Supabase tables with RLS and the Vercel deploy go on the next branch, not `setup/supabase-auth`.
+- Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
 - No test runner yet. Add vitest with the scoring step (CLAUDE.md updated to say so).
 - Use Geist as the font (removed the Arial override rather than dropping the Geist imports).
 
 ## Open questions
 - README.md is still the create-next-app text. Replace it, and with what?
-- Supabase dashboard: set the Site URL and add `/auth/confirm` to the redirect URLs, for localhost and the Vercel domain. Optionally change the "Confirm signup" template to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` so the link also works on another device.
 - `npm audit`: 5 high (`braces` through `eslint-config-next`, dev only). The suggested fix downgrades to eslint-config-next 14, so it is not applied.
 - No PR opened for `setup/scaffold` yet.
