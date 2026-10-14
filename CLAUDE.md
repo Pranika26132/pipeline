@@ -3,7 +3,7 @@ Web app for finding startups and small firms to cold-email for tech/quant intern
 
 ## Commands
 - Run: npm run dev
-- Test: npm test
+- Test: none yet. Add vitest with the scoring step.
 - Build/typecheck: npm run build
 
 ## Stack
