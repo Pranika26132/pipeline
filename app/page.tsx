@@ -47,6 +47,8 @@ async function TargetList() {
     .from("companies")
     .select("id, name, domain, needs_manual_info", { count: "exact" })
     .order("created_at", { ascending: false })
+    // A CSV import saves every row with the same timestamp; list those A to Z.
+    .order("name")
     .order("id")
     .range(0, LIST_LIMIT - 1);
 
