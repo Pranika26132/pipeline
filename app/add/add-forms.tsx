@@ -74,8 +74,12 @@ export function AddLinkForm() {
 export function AddCsvForm() {
   const [state, formAction, pending] = useActionState<AddState, FormData>(addFromCsv, {});
   const [fileError, setFileError] = useState<string>();
+  // Picking a new file hides the result of the last import.
+  const [staleAt, setStaleAt] = useState<number>();
+  const current = state.submittedAt !== staleAt;
 
   function checkFile(e: React.ChangeEvent<HTMLInputElement>) {
+    setStaleAt(state.submittedAt);
     const file = e.target.files?.[0];
     if (file && file.size > CSV_MAX_BYTES) {
       setFileError(
@@ -105,7 +109,7 @@ export function AddCsvForm() {
       </label>
 
       <div aria-live="polite" className="empty:hidden">
-        {(fileError ?? state.error) && (
+        {(fileError ?? (current && state.error)) && (
           <p role="alert" className={alert}>
             {fileError ?? state.error}
           </p>
@@ -121,7 +125,7 @@ export function AddCsvForm() {
         {pending ? "Importing…" : "Import companies"}
       </button>
 
-      {state.rows && !fileError && <ImportReport rows={state.rows} />}
+      {state.rows && current && !fileError && <ImportReport rows={state.rows} />}
     </form>
   );
 }

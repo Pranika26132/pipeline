@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { parseCsv } from "@/lib/csv";
+import { parseCsv, type CsvRow } from "@/lib/csv";
 import { normalizeCompanyUrl } from "@/lib/domain";
 import { createClient } from "@/lib/supabase/server";
 
@@ -36,11 +36,36 @@ type Candidate = {
 };
 
 const LOOKUP_CHUNK = 100;
+const NAME_MAX_LENGTH = 200;
+const FILENAME_MAX_LENGTH = 100;
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+// Every action checks the session before reading the request body further.
+async function signedInClient(): Promise<{ supabase: Supabase } | { error: string }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getClaims();
+  if (error) {
+    return { error: `Your session couldn't be checked (${error.message}). Sign in again.` };
+  }
+  if (!data?.claims) {
+    return { error: "You're signed out. Sign in again to add companies." };
+  }
+  return { supabase };
+}
 
 export async function addFromUrl(_prev: AddState, formData: FormData): Promise<AddState> {
   const submittedAt = Date.now();
   const input = String(formData.get("url") ?? "");
   const name = String(formData.get("name") ?? "").trim();
+
+  const session = await signedInClient();
+  if ("error" in session) {
+    return { submittedAt, url: input, name, error: session.error };
+  }
+  if (name.length > NAME_MAX_LENGTH) {
+    return { submittedAt, url: input, name, error: `Keep the name under ${NAME_MAX_LENGTH} characters.` };
+  }
 
   const normalized = normalizeCompanyUrl(input);
   if (!normalized.ok) {
@@ -53,12 +78,16 @@ export async function addFromUrl(_prev: AddState, formData: FormData): Promise<A
     url: normalized.url,
     domain: normalized.domain,
   };
-  const result = await save([candidate], [], "link", submittedAt);
+  const result = await save(session.supabase, [candidate], [], "link", submittedAt);
   return result.error ? { ...result, url: input, name } : result;
 }
 
 export async function addFromCsv(_prev: AddState, formData: FormData): Promise<AddState> {
   const submittedAt = Date.now();
+  const session = await signedInClient();
+  if ("error" in session) {
+    return { submittedAt, error: session.error };
+  }
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
     return { submittedAt, error: "Choose a CSV file first." };
@@ -70,7 +99,7 @@ export async function addFromCsv(_prev: AddState, formData: FormData): Promise<A
     };
   }
 
-  let table: string[][];
+  let table: CsvRow[];
   try {
     table = parseCsv(await file.text());
   } catch (e) {
@@ -81,7 +110,7 @@ export async function addFromCsv(_prev: AddState, formData: FormData): Promise<A
     return { submittedAt, error: "That file is empty." };
   }
 
-  const header = table[0].map((h) => h.trim().toLowerCase());
+  const header = table[0].cells.map((h) => h.trim().toLowerCase());
   const nameCol = header.indexOf("name");
   const urlCol = header.indexOf("url");
   if (nameCol === -1 || urlCol === -1) {
@@ -105,15 +134,22 @@ export async function addFromCsv(_prev: AddState, formData: FormData): Promise<A
 
   const candidates: Candidate[] = [];
   const rejected: RowOutcome[] = [];
-  body.forEach((cells, i) => {
-    // Line numbers match the file as opened in a spreadsheet (header is line 1).
-    const line = i + 2;
+  body.forEach(({ cells, line }) => {
     const rawUrl = (cells[urlCol] ?? "").trim();
     const rawName = (cells[nameCol] ?? "").trim();
     const label = rawName || rawUrl || "(blank)";
     const normalized = normalizeCompanyUrl(rawUrl);
     if (!normalized.ok) {
       rejected.push({ label, line, status: "skipped", message: normalized.error });
+      return;
+    }
+    if (rawName.length > NAME_MAX_LENGTH) {
+      rejected.push({
+        label: `${rawName.slice(0, 60)}…`,
+        line,
+        status: "skipped",
+        message: `Name is over ${NAME_MAX_LENGTH} characters.`,
+      });
       return;
     }
     candidates.push({
@@ -125,26 +161,17 @@ export async function addFromCsv(_prev: AddState, formData: FormData): Promise<A
     });
   });
 
-  return save(candidates, rejected, `csv:${file.name}`, submittedAt);
+  const source = `csv:${file.name.slice(0, FILENAME_MAX_LENGTH)}`;
+  return save(session.supabase, candidates, rejected, source, submittedAt);
 }
 
 async function save(
+  supabase: Supabase,
   candidates: Candidate[],
   rejected: RowOutcome[],
   source: string,
   submittedAt: number,
 ): Promise<AddState> {
-  const supabase = await createClient();
-  const { data: auth, error: authError } = await supabase.auth.getClaims();
-  if (authError || !auth?.claims) {
-    return {
-      submittedAt,
-      error: authError
-        ? `Your session couldn't be checked (${authError.message}). Sign in again.`
-        : "You're signed out. Sign in again to add companies.",
-    };
-  }
-
   const outcomes: RowOutcome[] = [...rejected];
 
   // The same domain twice in one file: keep the first.

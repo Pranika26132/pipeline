@@ -1,10 +1,18 @@
-// Minimal RFC 4180 parser: commas, double-quoted fields, "" escapes, and
-// CRLF or LF line endings. Blank lines are dropped.
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
+export type CsvRow = {
+  cells: string[];
+  // 1-based line in the file where this row starts, as a text editor counts.
+  line: number;
+};
+
+// Minimal RFC 4180 parser: commas, double-quoted fields (which may span
+// lines), "" escapes, and CRLF or LF line endings. Blank lines are dropped.
+export function parseCsv(text: string): CsvRow[] {
+  const rows: CsvRow[] = [];
+  let cells: string[] = [];
   let field = "";
   let inQuotes = false;
+  let line = 1;
+  let rowStart = 1;
   const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 
   for (let i = 0; i < src.length; i++) {
@@ -18,21 +26,26 @@ export function parseCsv(text: string): string[][] {
           inQuotes = false;
         }
       } else {
+        if (ch === "\n" || (ch === "\r" && src[i + 1] !== "\n")) {
+          line++;
+        }
         field += ch;
       }
     } else if (ch === '"') {
       inQuotes = true;
     } else if (ch === ",") {
-      row.push(field);
+      cells.push(field);
       field = "";
     } else if (ch === "\n" || ch === "\r") {
       if (ch === "\r" && src[i + 1] === "\n") {
         i++;
       }
-      row.push(field);
-      rows.push(row);
-      row = [];
+      cells.push(field);
+      rows.push({ cells, line: rowStart });
+      cells = [];
       field = "";
+      line++;
+      rowStart = line;
     } else {
       field += ch;
     }
@@ -40,10 +53,10 @@ export function parseCsv(text: string): string[][] {
   if (inQuotes) {
     throw new Error("A quoted field is never closed. Check the file for a stray \" character.");
   }
-  if (field !== "" || row.length > 0) {
-    row.push(field);
-    rows.push(row);
+  if (field !== "" || cells.length > 0) {
+    cells.push(field);
+    rows.push({ cells, line: rowStart });
   }
 
-  return rows.filter((r) => r.some((cell) => cell.trim() !== ""));
+  return rows.filter((r) => r.cells.some((cell) => cell.trim() !== ""));
 }
