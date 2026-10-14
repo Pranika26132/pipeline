@@ -16,6 +16,14 @@
 - Confirmation-link errors reach `/login` as a code (`lib/auth-link-errors.ts`) shown in our own wording; raw query text is never shown. Sign-up shows the same neutral message when the email is taken. The proxy allows exactly `/login` and paths under `/auth/`.
 - Supabase dashboard: Site URL and the `/auth/confirm` redirect URLs are set (done).
 
+## Finished (branch `setup/database`, 2026-10-14)
+- Migration `supabase/migrations/20261014200135_create_core_tables.sql`, applied through the Supabase MCP (remote version matches the filename).
+- Tables `profiles`, `companies`, `contacts`, `outreach`. `user_id` defaults to `auth.uid()` and cascades on user delete. `companies.domain` is required and lowercase, unique per user.
+- RLS on all four, separate select/insert/update/delete policies for `authenticated`. contacts/outreach inserts and updates also check the company (and contact) belong to the user, and outreach's contact belongs to that company. `anon` has no grants.
+- Composite foreign keys `(company_id, user_id)` and `(contact_id, user_id)` stop cross-user links even for the service role.
+- Tested as two simulated users in SQL (rolled back, test users deleted): B saw 0 of A's rows, changed and deleted 0, and every insert/update pointing at A's data was rejected.
+- Security advisor: only "Leaked Password Protection disabled" (dashboard setting, not SQL).
+
 ## Decisions
 - Supabase tables with RLS and the Vercel deploy go on the next branch, not `setup/supabase-auth`.
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
@@ -26,3 +34,5 @@
 - README.md is still the create-next-app text. Replace it, and with what?
 - `npm audit`: 5 high (`braces` through `eslint-config-next`, dev only). The suggested fix downgrades to eslint-config-next 14, so it is not applied.
 - No PR opened for `setup/scaffold` yet.
+- Turn on Leaked Password Protection in Supabase (Authentication > Sign In / Providers > Email). May need a paid plan.
+- No column for score weights yet. Add with the scoring step.
