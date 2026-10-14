@@ -16,7 +16,9 @@ export type AuthFormState = {
   email?: string;
 };
 
-const ALREADY_REGISTERED = "An account with this email already exists. Sign in instead.";
+// Same wording whether or not the email is taken, so sign-up doesn't confirm
+// which addresses have accounts.
+const SIGNUP_REFUSED = "Couldn't create that account. If you already have one, sign in instead.";
 
 function describeAuthError(error: unknown): string {
   if (!isAuthError(error)) {
@@ -29,7 +31,7 @@ function describeAuthError(error: unknown): string {
       return "Confirm your email first. Open the link we sent you, then sign in.";
     case "user_already_exists":
     case "email_exists":
-      return ALREADY_REGISTERED;
+      return SIGNUP_REFUSED;
     case "weak_password":
       return `Choose a stronger password. ${error.message}`;
     case "email_address_invalid":
@@ -82,7 +84,7 @@ export async function authenticate(
   // Supabase returns a user with no identities when the email is already
   // registered, instead of an error.
   if (data.user && data.user.identities?.length === 0) {
-    return { mode, email, error: ALREADY_REGISTERED };
+    return { mode, email, error: SIGNUP_REFUSED };
   }
   if (!data.session) {
     return {
