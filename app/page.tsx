@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
@@ -44,6 +45,12 @@ async function Account() {
       <p className="text-lg">
         Signed in as <Email address={data.claims.email ?? ""} />
       </p>
+      <Link
+        href="/add"
+        className="flex min-h-14 items-center justify-center rounded-lg bg-accent px-6 text-lg font-semibold text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      >
+        Add companies
+      </Link>
       <SignOutButton />
     </div>
   );
