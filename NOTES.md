@@ -35,6 +35,13 @@
 - Limits: 500 KB and 500 rows per CSV (server actions cap bodies at 1 MB), names 200 characters.
 - Fresh-context review: no security issues. Fixed: directory URLs collapsing to one domain, invalid hostnames breaking the duplicate lookup, line-number drift, auth checked after parsing, stale error after picking a new file, uncapped names.
 
+## Finished (branch `feature/list`, 2026-10-14)
+- `/` is the target list: the user's companies newest first (same-import ties A to Z), up to 500 with "Showing the newest 500 of N" past that. Each row links to `/company/[id]` and shows a "Needs info" flag. Empty state points to Add companies. Signed-in email and Sign out moved to a footer at the bottom.
+- `/company/[id]`: name, website link, About (summary, stage, size, source, added date in the viewer's time zone), People (contacts with title, school, hometown, email, source link). Missing fields say "Unknown" or "Not looked up yet". Malformed or other users' ids show a not-found page (RLS returns no row).
+- Stored URLs are only rendered as links if they are http(s); external links use `noopener noreferrer`.
+- Fresh-context review: no cross-user leak or security issue. Fixed: rows from one CSV import showed in random order.
+- Known and left: the not-found page returns HTTP 200 because it renders inside Suspense after streaming starts (Next docs); the list runs an exact count each load. Both fine at this scale.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
