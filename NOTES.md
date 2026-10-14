@@ -20,12 +20,14 @@
 - Migration `supabase/migrations/20261014200135_create_core_tables.sql`, applied through the Supabase MCP (remote version matches the filename).
 - Tables `profiles`, `companies`, `contacts`, `outreach`. `user_id` defaults to `auth.uid()` and cascades on user delete. `companies.domain` is required and lowercase, unique per user.
 - RLS on all four, separate select/insert/update/delete policies for `authenticated`. contacts/outreach inserts and updates also check the company (and contact) belong to the user, and outreach's contact belongs to that company. `anon` has no grants.
-- Composite foreign keys `(company_id, user_id)` and `(contact_id, user_id)` stop cross-user links even for the service role.
+- Composite foreign keys stop bad links even for the service role: contacts and outreach `(company_id, user_id)` -> companies, and outreach `(contact_id, company_id, user_id)` -> contacts, so an outreach row's contact belongs to the same user and the same company. A contact cannot move to another company while outreach rows point at it; deleting a contact clears `contact_id` and keeps the outreach row.
 - Tested as two simulated users in SQL (rolled back, test users deleted): B saw 0 of A's rows, changed and deleted 0, and every insert/update pointing at A's data was rejected.
 - Security advisor: only "Leaked Password Protection disabled" (dashboard setting, not SQL).
+- Migration `20261014203854_harden_grants_and_outreach_contact.sql`: revoked TRUNCATE (it ignores RLS), REFERENCES and TRIGGER from `anon` and `authenticated`, and added the outreach-contact-company foreign key above.
+- Reran the two-user test for contacts and outreach (one transaction, rolled back, no test rows or users left): B saw, changed and deleted 0 of A's rows; every insert/update pointing at A's data and B's TRUNCATE were rejected; A could not link a contact to an outreach row for a different company or move a referenced contact, and the service-role equivalent was rejected by the foreign key too.
 
 ## Decisions
-- Supabase tables with RLS and the Vercel deploy go on the next branch, not `setup/supabase-auth`.
+- Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
 - No test runner yet. Add vitest with the scoring step (CLAUDE.md updated to say so).
 - Use Geist as the font (removed the Arial override rather than dropping the Geist imports).
