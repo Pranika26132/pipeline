@@ -42,9 +42,27 @@ async function Account() {
   return (
     <div className="mt-6 flex flex-col gap-10">
       <p className="text-lg">
-        Signed in as <span className="font-semibold break-all">{data.claims.email}</span>
+        Signed in as <Email address={data.claims.email ?? ""} />
       </p>
       <SignOutButton />
     </div>
+  );
+}
+
+// Keeps the address in one piece and moves it to its own line when it fits.
+// If it is wider than the screen it breaks before the "@", and only breaks
+// inside a part when that part alone is wider than the screen.
+function Email({ address }: { address: string }) {
+  const at = address.lastIndexOf("@");
+  const part = "inline-block max-w-full wrap-anywhere";
+  if (at <= 0) {
+    return <span className={`font-semibold ${part}`}>{address}</span>;
+  }
+  return (
+    <span className={`font-semibold ${part}`}>
+      <span className={part}>{address.slice(0, at)}</span>
+      <wbr />
+      <span className={part}>{address.slice(at)}</span>
+    </span>
   );
 }
