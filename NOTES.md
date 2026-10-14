@@ -26,6 +26,15 @@
 - Migration `20261014203854_harden_grants_and_outreach_contact.sql`: revoked TRUNCATE (it ignores RLS), REFERENCES and TRIGGER from `anon` and `authenticated`, and added the outreach-contact-company foreign key above.
 - Reran the two-user test for contacts and outreach (one transaction, rolled back, no test rows or users left): B saw, changed and deleted 0 of A's rows; every insert/update pointing at A's data and B's TRUNCATE were rejected; A could not link a contact to an outreach row for a different company or move a referenced contact, and the service-role equivalent was rejected by the foreign key too.
 
+## Finished (branch `feature/add-company`, 2026-10-14)
+- `/add`: paste one link (optional name, defaults to the domain) or import a CSV with `name` and `url` headers (case-insensitive; other columns ignored). Linked from `/`.
+- `lib/domain.ts` normalizes to a lowercase host without `www.` (bare `acme.com` gets https). Rejects non-http(s) schemes, user:password links, IPs, `localhost`, malformed hostnames, LinkedIn, and directory/job-board hosts (YC, Work at a Startup, Wellfound, Lever, Greenhouse, Ashby, etc.), because those would collapse many companies into one domain.
+- `lib/csv.ts`: small in-repo parser (quotes, multi-line fields, CRLF, BOM) instead of a dependency. Reports the file's real line numbers.
+- Dedupe on domain within the file and against the user's saved rows; the `(user_id, domain)` unique constraint catches races. Results show added / already saved / skipped per row with the reason.
+- `source` is `link` or `csv:<filename>`. No schema change; existing `companies` RLS policies cover it.
+- Limits: 500 KB and 500 rows per CSV (server actions cap bodies at 1 MB), names 200 characters.
+- Fresh-context review: no security issues. Fixed: directory URLs collapsing to one domain, invalid hostnames breaking the duplicate lookup, line-number drift, auth checked after parsing, stale error after picking a new file, uncapped names.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
