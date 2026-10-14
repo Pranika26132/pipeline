@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import { linkErrorMessage } from "@/lib/auth-link-errors";
 import { createClient } from "@/lib/supabase/server";
 
 import { LoginForm } from "./login-form";
@@ -32,14 +33,13 @@ async function SignedOutGate({ searchParams }: Pick<PageProps<"/login">, "search
     redirect("/");
   }
 
-  // Errors from the email confirmation link arrive as ?error=...
-  const linkError = (await searchParams).error;
+  // Errors from the email confirmation link arrive as ?error=<code>.
+  const linkError = linkErrorMessage((await searchParams).error);
   const initialError =
-    typeof linkError === "string"
-      ? linkError
-      : error
-        ? `Your saved session couldn't be checked (${error.message}). Sign in again.`
-        : undefined;
+    linkError ??
+    (error
+      ? `Your saved session couldn't be checked (${error.message}). Sign in again.`
+      : undefined);
 
   return <LoginForm initialError={initialError} />;
 }

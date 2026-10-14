@@ -1,6 +1,7 @@
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { type NextRequest, NextResponse } from "next/server";
 
+import { type LinkErrorCode } from "@/lib/auth-link-errors";
 import { createClient } from "@/lib/supabase/server";
 
 // The sign-up confirmation email links here. Supports both the token_hash
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
   const redirectTo = request.nextUrl.clone();
   redirectTo.search = "";
 
-  let message: string;
+  let errorCode: LinkErrorCode;
   if (tokenHash && type) {
     const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
       redirectTo.pathname = "/";
       return NextResponse.redirect(redirectTo);
     }
-    message = `That confirmation link didn't work (${error.message}). Sign in, or create your account again to get a new link.`;
+    errorCode = error.code === "otp_expired" ? "link_expired" : "link_invalid";
   } else if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -31,14 +32,15 @@ export async function GET(request: NextRequest) {
       redirectTo.pathname = "/";
       return NextResponse.redirect(redirectTo);
     }
-    message = `That confirmation link didn't work (${error.message}). Open it in the browser you signed up in, or sign in.`;
+    errorCode = error.code === "otp_expired" ? "link_expired" : "link_other_browser";
+  } else if (searchParams.has("error_code") || searchParams.has("error")) {
+    // Supabase's own verify endpoint redirects here with ?error_code= when the link fails.
+    errorCode = searchParams.get("error_code") === "otp_expired" ? "link_expired" : "link_invalid";
   } else {
-    message =
-      searchParams.get("error_description") ??
-      "That confirmation link is missing its token. Open the link from the email again.";
+    errorCode = "link_missing";
   }
 
   redirectTo.pathname = "/login";
-  redirectTo.searchParams.set("error", message);
+  redirectTo.searchParams.set("error", errorCode);
   return NextResponse.redirect(redirectTo);
 }
