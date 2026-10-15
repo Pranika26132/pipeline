@@ -45,7 +45,10 @@ export async function updateSession(request: NextRequest) {
   ) {
     // API callers get a JSON error they can show, not a redirect to a page.
     if (request.nextUrl.pathname.startsWith("/api/")) {
-      return NextResponse.json({ ok: false, error: "You're signed out. Sign in again." }, { status: 401 });
+      const denied = NextResponse.json({ ok: false, error: "You're signed out. Sign in again." }, { status: 401 });
+      // Carry over any session cookies Supabase just cleared or refreshed.
+      supabaseResponse.cookies.getAll().forEach((cookie) => denied.cookies.set(cookie));
+      return denied;
     }
     const url = request.nextUrl.clone();
     url.pathname = "/login";
