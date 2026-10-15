@@ -13,13 +13,16 @@ export type CollectResult = {
 
 // Link paths that usually hold what enrichment needs.
 const WANTED = [
-  { kind: "about", pattern: /\/(about|about-us|company|our-story|mission)(\/|$)/i, guess: "/about" },
-  { kind: "team", pattern: /\/(team|our-team|people|founders|leadership)(\/|$)/i, guess: "/team" },
-  { kind: "careers", pattern: /\/(careers|jobs|join|join-us|work-with-us|hiring)(\/|$)/i, guess: "/careers" },
+  { pattern: /\/(about|about-us|company|our-story|mission)(\/|$)/i, guess: "/about" },
+  { pattern: /\/(team|our-team|people|founders|leadership)(\/|$)/i, guess: "/team" },
+  { pattern: /\/(careers|jobs|join|join-us|work-with-us|hiring)(\/|$)/i, guess: "/careers" },
 ] as const;
 
+// A page skipped on purpose (robots.txt, another site). Always reported.
+class SkipError extends Error {}
+
 // Reads the homepage, then the about, team and careers pages it links to
-// (or the usual paths when it links to none), honoring robots.txt.
+// (or the usual paths when it links to none), honoring each host's robots.txt.
 export async function collectPages(startUrl: string, domain: string): Promise<CollectResult> {
   const problems: string[] = [];
   const home = new URL(startUrl);
@@ -27,60 +30,79 @@ export async function collectPages(startUrl: string, domain: string): Promise<Co
   home.search = "";
   home.hash = "";
 
-  const robots = await loadRobots(home);
-  if (robots.error) problems.push(robots.error);
+  const robotsByHost = new Map<string, Promise<Robots>>();
+  const robotsFor = (url: URL) => {
+    const key = url.origin;
+    if (!robotsByHost.has(key)) robotsByHost.set(key, loadRobots(url));
+    return robotsByHost.get(key)!;
+  };
+
+  // Checked before the first request and before every redirect hop, so an
+  // off-site or disallowed page is never downloaded.
+  async function beforeRequest(url: URL) {
+    if (!onDomain(url.hostname, domain)) {
+      throw new SkipError(`leads to ${url.hostname}, a different site, so it was skipped.`);
+    }
+    const robots = await robotsFor(url);
+    if (robots.error) throw new SkipError(robots.error);
+    if (!robots.allows(url.pathname + url.search)) {
+      throw new SkipError("the site's robots.txt asks bots not to read it.");
+    }
+  }
 
   const pages: PageText[] = [];
   const seen = new Set<string>();
 
-  async function read(url: URL, required: boolean): Promise<string | null> {
+  // `guessed` pages are paths we tried without a link; a 404 there is normal.
+  async function read(url: URL, guessed: boolean): Promise<string | null> {
     const key = url.href.replace(/\/$/, "");
-    if (seen.has(key) || pages.length >= MAX_PAGES) return null;
+    if (seen.has(key)) return null;
     seen.add(key);
-    if (!robots.allows(url.pathname)) {
-      if (required) problems.push(`${url.href}: the site's robots.txt asks bots not to read it.`);
-      return null;
-    }
     try {
-      const res = await safeFetch(url.href);
+      const res = await safeFetch(url.href, { beforeRequest });
       if (res.status >= 400) {
-        if (required) problems.push(`${url.href}: the site answered ${res.status}.`);
+        if (!(guessed && (res.status === 404 || res.status === 410))) {
+          problems.push(`${url.href}: the site answered ${res.status}.`);
+        }
         return null;
       }
       if (!res.contentType.includes("text/html") && !res.contentType.includes("text/plain")) {
-        if (required) problems.push(`${url.href}: not a web page (${res.contentType || "unknown type"}).`);
+        problems.push(`${url.href}: not a web page (${res.contentType || "unknown type"}).`);
         return null;
       }
-      const finalUrl = new URL(res.url);
-      if (!onDomain(finalUrl.hostname, domain)) {
-        problems.push(`${url.href}: redirected to ${finalUrl.hostname}, a different site, so it was skipped.`);
-        return null;
-      }
+      if (pages.length >= MAX_PAGES) return null;
       pages.push({ url: res.url, text: htmlToText(res.body).slice(0, MAX_TEXT_PER_PAGE) });
       return res.body;
     } catch (e) {
-      if (required) problems.push(`${url.href}: ${(e as Error).message}`);
+      problems.push(`${url.href}: ${(e as Error).message}`);
       return null;
     }
   }
 
-  const homeHtml = await read(home, true);
+  const homeHtml = await read(home, false);
   const links = homeHtml ? extractLinks(homeHtml, home, domain) : [];
 
-  const targets: URL[] = [];
+  // One page of each kind first, so careers is never crowded out by two
+  // about pages; second links of a kind fill any room left.
+  const first: { url: URL; guessed: boolean }[] = [];
+  const extra: { url: URL; guessed: boolean }[] = [];
   for (const want of WANTED) {
-    const found = links.filter((l) => want.pattern.test(l.pathname)).slice(0, 2);
-    targets.push(...(found.length ? found : [new URL(want.guess, home)]));
+    const found = links.filter((l) => want.pattern.test(l.pathname));
+    if (found.length === 0) {
+      first.push({ url: new URL(want.guess, home), guessed: true });
+    } else {
+      first.push({ url: found[0], guessed: false });
+      if (found[1]) extra.push({ url: found[1], guessed: false });
+    }
   }
-  // Guessed paths often 404; that's expected, so only linked pages report problems.
-  const linked = new Set(links.map((l) => l.href));
-  await Promise.all(targets.slice(0, MAX_PAGES - 1).map((t) => read(t, linked.has(t.href))));
+  const targets = [...first, ...extra].slice(0, MAX_PAGES - 1);
+  await Promise.all(targets.map((t) => read(t.url, t.guessed)));
 
   return { pages, problems };
 }
 
 function onDomain(host: string, domain: string) {
-  const h = host.toLowerCase().replace(/^www\./, "");
+  const h = host.toLowerCase().replace(/\.+$/, "").replace(/^www\./, "");
   return h === domain || h.endsWith(`.${domain}`);
 }
 
@@ -131,19 +153,22 @@ function safeChar(code: number) {
 
 type Robots = { allows: (path: string) => boolean; error?: string };
 
-async function loadRobots(home: URL): Promise<Robots> {
+async function loadRobots(origin: URL): Promise<Robots> {
   const allowAll: Robots = { allows: () => true };
+  const robotsUrl = new URL("/robots.txt", origin);
   let body: string;
   try {
-    const res = await safeFetch(new URL("/robots.txt", home).href, "text/plain");
+    // No beforeRequest hook here: it would need robots.txt itself. safeFetch
+    // still blocks private addresses and LinkedIn on every hop.
+    const res = await safeFetch(robotsUrl.href, { accept: "text/plain" });
     // No robots.txt (4xx) means no restrictions.
     if (res.status >= 400 && res.status < 500) return allowAll;
     if (res.status >= 500) {
-      return { allows: () => false, error: "The site's robots.txt couldn't be read, so its pages were not fetched." };
+      return { allows: () => false, error: `${origin.host}'s robots.txt couldn't be read (${res.status}), so its pages were not fetched.` };
     }
     body = res.body;
   } catch (e) {
-    return { allows: () => false, error: `The site couldn't be reached (${(e as Error).message}).` };
+    return { allows: () => false, error: `${origin.host} couldn't be reached (${(e as Error).message}).` };
   }
   const rules = parseRobots(body);
   return { allows: (path) => isAllowed(rules, path) };
@@ -169,7 +194,7 @@ export function parseRobots(text: string): Rule[] {
         current = { agents: [], rules: [] };
         groups.push(current);
       }
-      current.agents.push(value.toLowerCase());
+      if (value) current.agents.push(value.toLowerCase());
       lastWasAgent = true;
     } else if ((field === "allow" || field === "disallow") && current) {
       if (value) current.rules.push({ allow: field === "allow", path: value });
@@ -185,6 +210,7 @@ export function parseRobots(text: string): Rule[] {
 }
 
 // Longest matching rule wins; Allow wins a tie. Supports * and $.
+// `path` includes the query string, so rules like "Disallow: /*?" apply.
 export function isAllowed(rules: Rule[], path: string): boolean {
   let best: Rule | null = null;
   for (const rule of rules) {

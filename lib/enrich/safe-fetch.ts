@@ -41,8 +41,8 @@ for (const [addr, prefix] of [
   blockedV4.addSubnet(addr, prefix, "ipv4");
 }
 for (const [addr, prefix] of [
-  ["::", 128],
-  ["::1", 128],
+  // Unspecified, loopback and IPv4-compatible (::a.b.c.d) addresses.
+  ["::", 96],
   // IPv4-mapped, NAT64 and 6to4 addresses can wrap a private IPv4 address.
   ["::ffff:0:0", 96],
   ["64:ff9b::", 96],
@@ -97,7 +97,8 @@ function checkUrl(url: URL) {
   if (url.port && url.port !== "80" && url.port !== "443") {
     throw new FetchBlockedError("Only standard web ports can be fetched.");
   }
-  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  // "linkedin.com." is the same host as "linkedin.com".
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.+$/, "");
   // IP literals skip DNS lookup, so check them directly.
   if (net.isIP(host) && !isPublicAddress(host)) {
     throw new FetchBlockedError("That address is private or reserved.");
@@ -117,14 +118,22 @@ export type FetchedPage = {
   body: string;
 };
 
+export type FetchOptions = {
+  accept?: string;
+  // Runs before every request, including each redirect hop; throw to stop.
+  beforeRequest?: (url: URL) => Promise<void>;
+};
+
 // GET a URL with a timeout, a size cap, and manual redirect handling.
 // Resolves for any HTTP status; rejects on blocked targets and network errors.
-export async function safeFetch(input: string, accept = "text/html,text/plain"): Promise<FetchedPage> {
+export async function safeFetch(input: string, options: FetchOptions = {}): Promise<FetchedPage> {
+  const accept = options.accept ?? "text/html,text/plain";
   let url = new URL(input);
   const deadline = Date.now() + TIMEOUT_MS;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     checkUrl(url);
+    await options.beforeRequest?.(url);
     const res = await request(url, accept, deadline);
     if (res.status >= 300 && res.status < 400 && res.location) {
       url = new URL(res.location, url);
