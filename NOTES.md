@@ -108,10 +108,22 @@ Known limits:
 - A failed lookup also starts the 60 s cooldown.
 - The proxy returns 401 for every `/api/*` path. A future webhook or cron route would need an exception.
 
+## Security fix: API key leaked into lookup errors (branch `feature/enrich`, 2026-10-16)
+- **What happened:** a key with a newline inside it made Node's `Headers.append` throw a `TypeError` that quoted the whole key. The route's catch-all (`Lookup failed: ${e.message}`) showed it on the company page and saved it in `companies.enrich_error`. The user revoked that key and set a new one in `.env.local` and Vercel.
+- **Fix:**
+  - Anthropic and fetch errors map to fixed messages (`lib/enrich/errors.ts` `describeModelError`, `lib/enrich/safe-fetch.ts` `describeFetchError`); `e.message` from either is never shown or saved. A rejected key shows "Claude API key is missing or invalid — check ANTHROPIC_API_KEY."
+  - The route checks the key first (`isWellFormedApiKey`: `sk-ant-`, trimmed, one line, key characters only) and passes it to the client explicitly.
+  - `lib/redact.ts` `redactSecrets` removes anything `sk-ant-`-shaped and each line of the configured key. Every error the route returns or saves goes through it, and the company page redacts `enrich_error` again when rendering.
+- **Database:** `update companies set enrich_error = null where enrich_error ilike '%sk-ant%'` cleared 2 rows (run through the Supabase MCP; queries returned ids and counts only). No other `companies` column contained `sk-ant`.
+- **Tests:** added vitest 4.1.11 (user approved; 5.x needs `@types/node` 22+, the project is on 20). `npm test` runs `lib/redact.test.ts`: redaction, key validation, and that model and fetch errors never repeat their message.
+- Fresh-context review: no remaining path where a raw error message reaches the page, the database or the client bundle; real keys pass the format check; no key-shaped string in git history apart from the made-up test key. Its one real issue (rows already holding the key) was already handled by the cleanup above and the key rotation. Added its suggested end-to-end test: a key with a newline really does throw an error quoting it, and the message shown has no key.
+- Known limit: pieces of the configured key shorter than 12 characters aren't redacted by exact match (`sk-ant-` shapes always are). Moot while no raw message is shown.
+- SPEC.md has a new "Discover" section (HN Who is hiring, Saturday, only if drafts and status are done).
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
-- No test runner yet. Add vitest with the scoring step (CLAUDE.md updated to say so).
+- vitest added on 2026-10-16 for the redaction tests; scoring tests go there too.
 - Use Geist as the font (removed the Arial override rather than dropping the Geist imports).
 
 ## Open questions

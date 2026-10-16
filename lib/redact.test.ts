@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 
 import { describeModelError } from "./enrich/errors";
+import { extract } from "./enrich/extract";
 import { describeFetchError } from "./enrich/safe-fetch";
 import { API_KEY_MESSAGE, isWellFormedApiKey, REDACTED, redactSecrets } from "./redact";
 
@@ -69,6 +70,20 @@ describe("describeModelError", () => {
   it("gives only the status for other API errors", () => {
     const e = new Anthropic.InternalServerError(500, { message: FAKE }, `500 ${FAKE}`, new Headers());
     expect(describeModelError(e)).toBe("The Claude API returned an error (status 500). Try again.");
+  });
+});
+
+describe("a malformed key end to end", () => {
+  it("fails before sending, and the message shown has no key in it", async () => {
+    // The original bug: a newline inside the key makes the HTTP client throw
+    // an error that quotes the key. No request leaves the machine.
+    const error = await extract(`${FAKE}\nsk-ant-SECOND`, "Acme", [{ url: "https://acme.test/", text: "Acme" }]).catch(
+      (e: unknown) => e,
+    );
+    expect(String((error as Error).message)).toContain("sk-ant");
+    const shown = describeModelError(error);
+    expect(shown).not.toContain("sk-ant");
+    expect(shown).not.toContain("FAKEfake");
   });
 });
 
