@@ -130,6 +130,10 @@ Known limits:
   - No new policies: the existing `profiles: * own` policies (`user_id = auth.uid()`) cover the new columns.
 - Tested by script with throwaway users (deleted afterwards): the DB rejects out-of-range weights, unknown interests, 4 samples, long school, long samples and roles; a user can't write a row with another user's id (42501), sees 0 of another user's rows and updates 0; a no-JS form post saved trimmed, deduped values and returned errors for bad input; the home prompt shows when empty and goes away once saved.
 - Fresh-context review: no RLS hole or client leak. Fixed: per-item lengths were only checked in the app; an oversized paste or dropped connection replaced the page with the error screen and lost the form; a stale error showed while saving; the form showed untrimmed input after saving; Sample 3 was marked optional though none are required.
+- Changed before merge (user request):
+  - All three writing samples are optional, with one sentence above them about copying your tone. SPEC.md says drafts use a clear, friendly, professional tone when there are none.
+  - The weights moved under a collapsed "Customize ranking" section, closed by default. Each factor offers three choices: "Doesn't matter", "Matters" or "Matters a lot". The number inputs are gone, and the columns and limits are unchanged. School, hometown and open role score 0/2/3; early stage scores 0/1/2. The defaults (school "Matters a lot", the rest "Matters") store 3/2/2/1. A stored number that matches no choice shows as the nearest one (`levelFor` in `lib/profile.ts`, tested in `lib/profile.test.ts`).
+  - The form's Save goes through a small browser-side wrapper, so it needs JavaScript; a plain form post without JS no longer saves. The save was tested by calling the action with React's own `encodeReply`, as the browser does.
 - Known: `updated_at` is set by the app, not a trigger; nothing reads it yet. Saving the profile doesn't rescore companies yet; that comes with `feature/scoring`.
 
 ## Decisions

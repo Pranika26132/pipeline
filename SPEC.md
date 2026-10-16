@@ -14,6 +14,7 @@ Me first. Other Duke students second (requirement: someone other than me can use
 
 ## Filters and scoring (the part that makes it mine)
 Each user sets a profile once: school, hometown/region, interests (tech, quant), target roles.
+On /profile the weights below are set under a collapsed "Customize ranking" section as three choices per factor: "Doesn't matter" (0), "Matters", "Matters a lot". Points per choice: school, hometown and open role 0 / 2 / 3; early stage 0 / 1 / 2. The defaults ("Matters a lot" for school, "Matters" for the rest) give the points below.
 Score is a plain weighted sum I can see and change, not a black box:
 - Founder or team member went to my school: +3
 - Founder or team member from my hometown/region: +2
@@ -26,6 +27,7 @@ Every score shows its reasons ("Founder went to Duke: found on /about page") wit
 - Input: company summary, contact (if any), my profile, 2-3 samples of my own writing, which hook to use (alumni, hometown, a specific thing they built).
 - Output: short email (under 120 words), one specific reference to the company, one clear ask.
 - Must sound like me: samples are included in the prompt, and the prompt forbids stock phrases ("I hope this finds you well", "passionate about", "seamless").
+- Writing samples are optional. If the profile has none, drafts use a clear, friendly, professional tone instead (still no stock phrases).
 - Only uses facts that came from the enrichment or my profile. No invented compliments or numbers.
 - **The app never sends anything.** It produces a draft; I read it and send it.
 
