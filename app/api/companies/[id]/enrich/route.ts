@@ -1,8 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { NextRequest } from "next/server";
 
-import { BadModelOutputError, extract } from "@/lib/enrich/extract";
+import { describeModelError } from "@/lib/enrich/errors";
+import { extract } from "@/lib/enrich/extract";
 import { collectPages } from "@/lib/enrich/pages";
+import { describeFetchError } from "@/lib/enrich/safe-fetch";
+import { API_KEY_MESSAGE, isWellFormedApiKey, redactSecrets } from "@/lib/redact";
 import { createClient } from "@/lib/supabase/server";
 
 // Page fetches (8s each, mostly in parallel) plus one model call.
@@ -16,8 +18,14 @@ export type EnrichResponse =
   | { ok: true; people: number; roles: number; notes: string[] }
   | { ok: false; error: string };
 
+// Last line of defense: no key reaches the page or the database, even if a
+// message above slipped one through.
+function safe(text: string) {
+  return redactSecrets(text, [process.env.ANTHROPIC_API_KEY]);
+}
+
 function fail(status: number, error: string) {
-  return Response.json({ ok: false, error } satisfies EnrichResponse, { status });
+  return Response.json({ ok: false, error: safe(error) } satisfies EnrichResponse, { status });
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[id]/enrich">) {
@@ -39,9 +47,10 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   if (authError) return fail(401, `Your session couldn't be checked (${authError.message}). Sign in again.`);
   if (!auth?.claims) return fail(401, "You're signed out. Sign in again.");
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return fail(500, "ANTHROPIC_API_KEY isn't set on the server, so companies can't be looked up.");
-  }
+  // A key with a stray newline or quote makes the HTTP client throw an error
+  // that quotes the key, so a malformed one is stopped here.
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!isWellFormedApiKey(apiKey)) return fail(500, API_KEY_MESSAGE);
 
   const { id } = await ctx.params;
   if (!UUID.test(id)) return fail(404, "That company isn't in your list.");
@@ -74,7 +83,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   try {
     collected = await collectPages(startUrl, company.domain);
   } catch (e) {
-    collected = { pages: [], problems: [`Couldn't read the site: ${(e as Error).message}`] };
+    collected = { pages: [], problems: [`Couldn't read the site. ${describeFetchError(e)}`] };
   }
   const { pages, problems } = collected;
 
@@ -83,7 +92,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     const error = ["None of the company's pages could be read.", ...problems].join("\n");
     const saved = await supabase
       .from("companies")
-      .update({ needs_manual_info: true, enrich_error: error })
+      .update({ needs_manual_info: true, enrich_error: safe(error) })
       .eq("id", id);
     if (saved.error) return fail(500, `${error}\nAlso couldn't save this result (${saved.error.message}).`);
     return fail(502, error);
@@ -91,11 +100,11 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
 
   let result;
   try {
-    result = await extract(company.name, pages);
+    result = await extract(apiKey, company.name, pages);
   } catch (e) {
     const error = describeModelError(e);
     // Keep the company row as it was; record the failure so the page shows it.
-    const saved = await supabase.from("companies").update({ enrich_error: error }).eq("id", id);
+    const saved = await supabase.from("companies").update({ enrich_error: safe(error) }).eq("id", id);
     if (saved.error) return fail(500, `${error}\nAlso couldn't save this result (${saved.error.message}).`);
     return fail(502, error);
   }
@@ -136,7 +145,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       open_roles: result.open_roles.length > 0 ? result.open_roles : oldRoles,
       // Flagged while the company has nobody to write to.
       needs_manual_info: existing.length + fresh.length === 0,
-      enrich_error: notes.length ? notes.join("\n") : null,
+      enrich_error: notes.length ? safe(notes.join("\n")) : null,
     })
     .eq("id", id);
   if (update.error) return fail(500, `Couldn't save what was found (${update.error.message}).`);
@@ -165,17 +174,6 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     ok: true,
     people: result.people.length,
     roles: result.open_roles.length,
-    notes,
+    notes: notes.map(safe),
   } satisfies EnrichResponse);
-}
-
-function describeModelError(e: unknown): string {
-  if (e instanceof BadModelOutputError) return `${e.message} The company was kept as it was; try again.`;
-  if (e instanceof Anthropic.AuthenticationError) return "The Claude API key was rejected. Check ANTHROPIC_API_KEY.";
-  if (e instanceof Anthropic.PermissionDeniedError) return "The Claude API key isn't allowed to use this model.";
-  if (e instanceof Anthropic.RateLimitError) return "Too many lookups at once. Wait a minute and try again.";
-  if (e instanceof Anthropic.APIConnectionTimeoutError) return "The Claude API took too long to answer. Try again.";
-  if (e instanceof Anthropic.APIConnectionError) return "Couldn't reach the Claude API. Try again.";
-  if (e instanceof Anthropic.APIError) return `The Claude API returned an error (${e.status ?? "no status"}): ${e.message}`;
-  return `Lookup failed: ${(e as Error).message}`;
 }

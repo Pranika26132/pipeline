@@ -67,6 +67,26 @@ export function isPublicAddress(address: string): boolean {
 }
 
 export class FetchBlockedError extends Error {}
+// A failure we describe ourselves (timeout, redirects); its message is safe to show.
+export class FetchFailedError extends Error {}
+
+// Node and TLS error messages can carry raw input, so they are never shown.
+// Maps any fetch error to a fixed, plain-language message.
+export function describeFetchError(e: unknown): string {
+  if (e instanceof FetchBlockedError || e instanceof FetchFailedError) return e.message;
+  const code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "";
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN" || code === "ENODATA") return "The site's address couldn't be found.";
+  if (code === "ECONNREFUSED") return "The site refused the connection.";
+  if (code === "ECONNRESET" || code === "EPIPE") return "The site closed the connection.";
+  if (code === "ETIMEDOUT") return "Timed out.";
+  if (/CERT|TLS|SSL|SIGNATURE/.test(code)) return "The site's security certificate couldn't be verified.";
+  if (code.startsWith("HPE_")) return "The site sent a response that couldn't be read.";
+  // zlib codes start with Z_; Brotli decoder codes look like ERR__ERROR_FORMAT_PADDING_1.
+  if (code.startsWith("Z_") || code.startsWith("ERR__ERROR_FORMAT")) {
+    return "The page couldn't be decompressed.";
+  }
+  return /^[A-Z0-9_]{2,40}$/.test(code) ? `The page couldn't be read (${code}).` : "The page couldn't be read.";
+}
 
 const safeLookup: net.LookupFunction = (hostname, options, callback) => {
   dns.lookup(hostname, { all: true, verbatim: true }, (err, addresses) => {
@@ -136,12 +156,16 @@ export async function safeFetch(input: string, options: FetchOptions = {}): Prom
     await options.beforeRequest?.(url);
     const res = await request(url, accept, deadline);
     if (res.status >= 300 && res.status < 400 && res.location) {
-      url = new URL(res.location, url);
+      try {
+        url = new URL(res.location, url);
+      } catch {
+        throw new FetchFailedError("The site redirected to a malformed address.");
+      }
       continue;
     }
     return { url: url.href, status: res.status, contentType: res.contentType, body: res.body };
   }
-  throw new Error("Too many redirects.");
+  throw new FetchFailedError("Too many redirects.");
 }
 
 type RawResponse = { status: number; contentType: string; location?: string; body: string };
@@ -150,7 +174,7 @@ function request(url: URL, accept: string, deadline: number): Promise<RawRespons
   return new Promise((resolve, reject) => {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      reject(new Error("Timed out."));
+      reject(new FetchFailedError("Timed out."));
       return;
     }
     const mod = url.protocol === "https:" ? https : http;
@@ -207,7 +231,7 @@ function request(url: URL, accept: string, deadline: number): Promise<RawRespons
     );
     // A hard deadline for the whole exchange, not just idle time, so a server
     // that trickles bytes can't hold the request open.
-    const timer = setTimeout(() => req.destroy(new Error("Timed out.")), remaining);
+    const timer = setTimeout(() => req.destroy(new FetchFailedError("Timed out.")), remaining);
     req.on("close", () => clearTimeout(timer));
     req.on("error", reject);
     req.end();

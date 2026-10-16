@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 
+import { redactSecrets } from "@/lib/redact";
 import { createClient } from "@/lib/supabase/server";
 
 import { LocalDate } from "../../local-date";
@@ -102,7 +103,8 @@ async function Company({ id }: { id: string }) {
           <div className="rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
             <p className="font-semibold">From the last lookup:</p>
             <ul className="mt-1 flex list-disc flex-col gap-1 pl-5">
-              {company.enrich_error.split("\n").map((line: string, i: number) => (
+              {/* Redacted again here so a row saved before the fix can't show a key. */}
+              {redactSecrets(company.enrich_error, [process.env.ANTHROPIC_API_KEY]).split("\n").map((line: string, i: number) => (
                 <li key={i} className="wrap-anywhere">
                   {line}
                 </li>

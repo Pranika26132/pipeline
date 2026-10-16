@@ -1,4 +1,4 @@
-import { safeFetch, USER_AGENT } from "./safe-fetch";
+import { describeFetchError, safeFetch, USER_AGENT } from "./safe-fetch";
 
 const MAX_PAGES = 5;
 const MAX_TEXT_PER_PAGE = 15_000;
@@ -74,7 +74,8 @@ export async function collectPages(startUrl: string, domain: string): Promise<Co
       pages.push({ url: res.url, text: htmlToText(res.body).slice(0, MAX_TEXT_PER_PAGE) });
       return res.body;
     } catch (e) {
-      problems.push(`${url.href}: ${(e as Error).message}`);
+      // Only our own messages are shown, never a raw Node error.
+      problems.push(`${url.href}: ${e instanceof SkipError ? e.message : describeFetchError(e)}`);
       return null;
     }
   }
@@ -168,7 +169,7 @@ async function loadRobots(origin: URL): Promise<Robots> {
     }
     body = res.body;
   } catch (e) {
-    return { allows: () => false, error: `${origin.host} couldn't be reached (${(e as Error).message}).` };
+    return { allows: () => false, error: `${origin.host} couldn't be reached. ${describeFetchError(e)}` };
   }
   const rules = parseRobots(body);
   return { allows: (path) => isAllowed(rules, path) };

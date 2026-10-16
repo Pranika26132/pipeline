@@ -83,9 +83,10 @@ export class BadModelOutputError extends Error {}
 
 const LIMITS = { summary: 600, short: 120, items: 40 };
 
-export async function extract(companyName: string, pages: PageText[]): Promise<Extraction> {
+// `apiKey` is checked by the caller (isWellFormedApiKey) before it gets here.
+export async function extract(apiKey: string, companyName: string, pages: PageText[]): Promise<Extraction> {
   // Page reads take up to ~24s; this keeps the route under its 60s limit.
-  const client = new Anthropic({ timeout: 25_000, maxRetries: 0 });
+  const client = new Anthropic({ apiKey, timeout: 25_000, maxRetries: 0 });
 
   const content =
     `Company: ${neutralize(companyName)}\n\n` +
