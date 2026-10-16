@@ -12,6 +12,7 @@ import {
   type ProfileValues,
   type WeightKey,
 } from "@/lib/profile";
+import { rescore } from "@/lib/rescore";
 import { createClient } from "@/lib/supabase/server";
 
 export type ProfileState = {
@@ -86,13 +87,16 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
   );
   if (error) return fail(`Couldn't save your profile (${error.message}). Nothing was changed.`);
 
-  revalidatePath("/");
-  revalidatePath("/profile");
+  // School, hometown, roles and weights all change scores.
+  const scored = await rescore(supabase);
+  revalidatePath("/", "layout");
+  const scoreError = scored.error && `Profile saved, but your list couldn't be re-ranked. ${scored.error} Save again to retry.`;
   // Show what was stored: trimmed, without repeats, samples moved up.
   const presetRoles = roleTargets.filter((r) => presets.has(r));
   return {
     submittedAt,
     saved: true,
+    error: scoreError,
     values: {
       school,
       hometown,

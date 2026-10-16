@@ -5,6 +5,7 @@ import { extract } from "@/lib/enrich/extract";
 import { collectPages } from "@/lib/enrich/pages";
 import { describeFetchError } from "@/lib/enrich/safe-fetch";
 import { API_KEY_MESSAGE, isWellFormedApiKey, redactSecrets } from "@/lib/redact";
+import { rescore } from "@/lib/rescore";
 import { createClient } from "@/lib/supabase/server";
 
 // Page fetches (8s each, mostly in parallel) plus one model call.
@@ -169,6 +170,10 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       return fail(500, message);
     }
   }
+
+  // The score reads the facts just saved.
+  const scored = await rescore(supabase, id);
+  if (scored.error) return fail(500, `Saved what was found, but the score couldn't be updated. ${scored.error}`);
 
   return Response.json({
     ok: true,

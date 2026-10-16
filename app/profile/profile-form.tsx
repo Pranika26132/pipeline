@@ -135,7 +135,7 @@ export function ProfileForm({ initial }: { initial: ProfileValues }) {
               {state.error}
             </p>
           )}
-          {state.saved && !pending && <p className="rounded-md border border-accent px-4 py-3 text-base">Profile saved.</p>}
+          {state.saved && !state.error && !pending && <p className="rounded-md border border-accent px-4 py-3 text-base">Profile saved.</p>}
         </div>
         <button
           type="submit"
