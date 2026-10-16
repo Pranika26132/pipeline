@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import { isProfileEmpty } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 
 import { SignOutButton } from "./sign-out-button";
@@ -11,7 +12,15 @@ const LIST_LIMIT = 500;
 export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pt-10 pb-10 sm:pt-16">
-      <h1 className="text-6xl font-bold tracking-[-0.05em]">Pipeline</h1>
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="text-6xl font-bold tracking-[-0.05em]">Pipeline</h1>
+        <Link
+          href="/profile"
+          className="-mr-2 flex min-h-12 shrink-0 items-center px-2 text-base font-medium underline underline-offset-4"
+        >
+          Profile
+        </Link>
+      </div>
       <Suspense fallback={<p className="mt-6 text-lg text-muted">Loading your companies…</p>}>
         <TargetList />
       </Suspense>
@@ -42,18 +51,44 @@ async function TargetList() {
     redirect("/login");
   }
 
-  // RLS limits this to the signed-in user's rows.
-  const { data: companies, error, count } = await supabase
-    .from("companies")
-    .select("id, name, domain, needs_manual_info", { count: "exact" })
-    .order("created_at", { ascending: false })
-    // A CSV import saves every row with the same timestamp; list those A to Z.
-    .order("name")
-    .order("id")
-    .range(0, LIST_LIMIT - 1);
+  // RLS limits both to the signed-in user's rows.
+  const [{ data: companies, error, count }, profileResult] = await Promise.all([
+    supabase
+      .from("companies")
+      .select("id, name, domain, needs_manual_info", { count: "exact" })
+      .order("created_at", { ascending: false })
+      // A CSV import saves every row with the same timestamp; list those A to Z.
+      .order("name")
+      .order("id")
+      .range(0, LIST_LIMIT - 1),
+    supabase.from("profiles").select("school, hometown, interests, role_targets, writing_samples").maybeSingle(),
+  ]);
 
   return (
     <>
+      {profileResult.error ? (
+        <p role="alert" className="mt-6 rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
+          Couldn’t load your profile ({profileResult.error.message}). Reload the page to try again.
+        </p>
+      ) : (
+        isProfileEmpty(profileResult.data) && (
+          <section aria-labelledby="profile-prompt" className="mt-8 flex flex-col gap-4 rounded-lg border-2 border-accent p-5">
+            <h2 id="profile-prompt" className="text-2xl font-semibold tracking-[-0.02em]">
+              Your profile is empty
+            </h2>
+            <p className="text-lg text-muted">
+              Add your school, hometown and target roles so Pipeline can rank companies for you, plus a few writing
+              samples for drafts.
+            </p>
+            <Link
+              href="/profile"
+              className="flex min-h-14 items-center justify-center rounded-lg border-2 border-accent px-6 text-lg font-semibold text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              Fill in your profile
+            </Link>
+          </section>
+        )
+      )}
       <div className="mt-8 flex flex-col gap-5">
         {error ? (
           <p role="alert" className="rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
