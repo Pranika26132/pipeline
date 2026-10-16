@@ -3,9 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 
+import { redactSecrets } from "@/lib/redact";
 import { createClient } from "@/lib/supabase/server";
 
 import { LocalDate } from "../../local-date";
+import { EnrichButton } from "./enrich-button";
 
 export const metadata: Metadata = {
   title: "Company · Pipeline",
@@ -42,7 +44,7 @@ async function Company({ id }: { id: string }) {
   const [companyResult, contactsResult] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at")
+      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -61,6 +63,12 @@ async function Company({ id }: { id: string }) {
   }
 
   const href = safeHref(company.url);
+  const sources = (company.field_sources ?? {}) as Record<string, string | undefined>;
+  const roles = (Array.isArray(company.open_roles) ? company.open_roles : []) as {
+    title: string;
+    location: string | null;
+    source_url: string;
+  }[];
 
   return (
     <article className="mt-6 flex flex-col">
@@ -80,27 +88,88 @@ async function Company({ id }: { id: string }) {
 
       {company.needs_manual_info && (
         <p className="mt-4 rounded-md border border-danger px-4 py-3 text-base">
-          The company’s pages didn’t say enough to fill this in. Add details by hand.
+          The company’s pages didn’t name anyone on the team. Add details by hand.
         </p>
       )}
+
+      <section aria-label="Look up" className="mt-6 flex flex-col gap-3">
+        <EnrichButton companyId={company.id} domain={company.domain} looked={!!company.enriched_at} />
+        {company.enriched_at && (
+          <p className="text-base text-muted">
+            Last looked up <LocalDate iso={company.enriched_at} withTime />.
+          </p>
+        )}
+        {company.enrich_error && (
+          <div className="rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
+            <p className="font-semibold">From the last lookup:</p>
+            <ul className="mt-1 flex list-disc flex-col gap-1 pl-5">
+              {/* Redacted again here so a row saved before the fix can't show a key. */}
+              {redactSecrets(company.enrich_error, [process.env.ANTHROPIC_API_KEY]).split("\n").map((line: string, i: number) => (
+                <li key={i} className="wrap-anywhere">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
 
       <section aria-labelledby="about" className="mt-8 border-t-2 border-foreground pt-6">
         <h2 id="about" className="text-xl font-semibold">
           About
         </h2>
         {company.summary ? (
-          <p className="mt-3 max-w-[65ch] text-lg">{company.summary}</p>
+          <p className="mt-3 max-w-[65ch] text-lg">
+            {company.summary} <SourceLink url={sources.summary} />
+          </p>
         ) : (
-          <p className="mt-3 text-lg text-muted">Not looked up yet.</p>
+          <p className="mt-3 text-lg text-muted">
+            {company.enriched_at ? "The pages didn’t say what the company does." : "Not looked up yet."}
+          </p>
         )}
         <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 text-base">
-          <Fact term="Stage">{company.stage}</Fact>
-          <Fact term="Size">{company.size}</Fact>
+          <Fact term="Stage">
+            {company.stage && (
+              <>
+                {company.stage} <SourceLink url={sources.stage} />
+              </>
+            )}
+          </Fact>
+          <Fact term="Size">
+            {company.size && (
+              <>
+                {company.size} <SourceLink url={sources.size} />
+              </>
+            )}
+          </Fact>
           <Fact term="Added from">{describeSource(company.source)}</Fact>
           <Fact term="Added on">
             <LocalDate iso={company.created_at} />
           </Fact>
         </dl>
+      </section>
+
+      <section aria-labelledby="roles" className="mt-10 border-t-2 border-foreground pt-6">
+        <h2 id="roles" className="text-xl font-semibold">
+          Open roles
+        </h2>
+        {roles.length === 0 ? (
+          <p className="mt-3 text-lg text-muted">
+            {company.enriched_at ? "None listed on the pages that were read." : "Not looked up yet."}
+          </p>
+        ) : (
+          <ul className="mt-3 flex flex-col divide-y divide-rule border-y border-rule">
+            {roles.map((r, i) => (
+              <li key={i} className="flex flex-col gap-1 py-3">
+                <p className="text-lg font-semibold wrap-anywhere">{r.title}</p>
+                <p className="text-base text-muted">
+                  {r.location && `${r.location}. `}
+                  <SourceLink url={r.source_url} />
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section aria-labelledby="people" className="mt-10 border-t-2 border-foreground pt-6">
@@ -149,8 +218,25 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
   return (
     <>
       <dt className="text-muted">{term}</dt>
-      <dd className="wrap-anywhere">{children ?? <span className="text-muted">Unknown</span>}</dd>
+      <dd className="wrap-anywhere">{children || <span className="text-muted">Unknown</span>}</dd>
     </>
+  );
+}
+
+// Links a fact to the page it came from, labelled with that page's path.
+function SourceLink({ url }: { url?: string | null }) {
+  const href = safeHref(url ?? null);
+  if (!href) return null;
+  const { pathname } = new URL(href);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-base whitespace-nowrap text-muted underline underline-offset-4"
+    >
+      (source: {pathname === "/" ? "home page" : pathname})
+    </a>
   );
 }
 

@@ -29,6 +29,14 @@ Every score shows its reasons ("Founder went to Duke: found on /about page") wit
 - Only uses facts that came from the enrichment or my profile. No invented compliments or numbers.
 - **The app never sends anything.** It produces a draft; I read it and send it.
 
+## Discover (Saturday, only if drafts and status are done)
+A way to find new targets without leaving the app.
+- Pull the current Hacker News "Who is hiring?" thread through the official APIs only: the Algolia HN Search API to find this month's thread (posted by `whoishiring`), and the HN Firebase API or Algolia items endpoint for its top-level comments. No HTML scraping.
+- Send the posts to Claude with my profile (interests: tech, quant; target roles: internships). Claude picks the posts that match and, for each, pulls out only what the post states: company, a short description, location, roles, website. Anything not in the post stays empty. Post text is untrusted data, the same as company pages in enrichment.
+- Show the matches as a checklist: company, short description, location, roles, website, and a link to the original HN post. Nothing is checked by default.
+- Only the posts I tick are added, through the same path as `/add` (dedupe on domain, `source` = `hn:<thread id>`). **Never add anything automatically.**
+- Errors (API down, thread not found, bad model output) are shown on the page, like everywhere else.
+
 ## Data (Postgres on Supabase, RLS on every table)
 - `profiles`: user_id, school, hometown, interests, role_targets, writing_samples
 - `companies`: id, user_id, name, url, summary, stage, size, source, score, score_reasons (jsonb), created_at
