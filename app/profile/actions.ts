@@ -2,40 +2,29 @@
 
 import { revalidatePath } from "next/cache";
 
-import { INTERESTS, LIMITS, ROLE_PRESETS, WEIGHTS, type WeightKey } from "@/lib/profile";
+import {
+  INTERESTS,
+  LIMITS,
+  readProfileForm,
+  ROLE_PRESETS,
+  WEIGHTS,
+  type ProfileValues,
+  type WeightKey,
+} from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
-
-// What the user typed, echoed back so the form keeps it after an error.
-export type ProfileValues = {
-  school: string;
-  hometown: string;
-  interests: string[];
-  roles: string[];
-  otherRoles: string;
-  samples: string[];
-  weights: Record<WeightKey, string>;
-};
 
 export type ProfileState = {
   error?: string;
   saved?: boolean;
-  // Bumps on every submit so the form remounts with the echoed values.
+  // Bumps on every submit so the form remounts with `values`: what was typed
+  // after an error, what was stored after a save.
   submittedAt?: number;
   values?: ProfileValues;
 };
 
 export async function saveProfile(_prev: ProfileState, formData: FormData): Promise<ProfileState> {
   const submittedAt = Date.now();
-  const text = (name: string) => String(formData.get(name) ?? "");
-  const values: ProfileValues = {
-    school: text("school"),
-    hometown: text("hometown"),
-    interests: formData.getAll("interests").map(String),
-    roles: formData.getAll("roles").map(String),
-    otherRoles: text("otherRoles"),
-    samples: Array.from({ length: LIMITS.samples }, (_, i) => text(`sample${i}`)),
-    weights: Object.fromEntries(WEIGHTS.map((w) => [w.key, text(w.key)])) as Record<WeightKey, string>,
-  };
+  const values = readProfileForm(formData);
   const fail = (error: string): ProfileState => ({ submittedAt, values, error });
 
   const supabase = await createClient();
@@ -55,6 +44,7 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
   // Presets first, then the user's own, without repeats (case-insensitive).
   const presets = new Set<string>(ROLE_PRESETS);
   if (values.roles.some((r) => !presets.has(r))) return fail("Pick roles from the list, or add them under Other roles.");
+  if (values.otherRoles.length > LIMITS.otherRoles) return fail("Other roles is too long. List at most 20 roles.");
   const roleTargets: string[] = [];
   const seen = new Set<string>();
   for (const raw of [...values.roles, ...values.otherRoles.split(/[,\n]/)]) {
@@ -100,5 +90,19 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
 
   revalidatePath("/");
   revalidatePath("/profile");
-  return { submittedAt, saved: true, values };
+  // Show what was stored: trimmed, without repeats, samples moved up.
+  const presetRoles = roleTargets.filter((r) => presets.has(r));
+  return {
+    submittedAt,
+    saved: true,
+    values: {
+      school,
+      hometown,
+      interests,
+      roles: presetRoles,
+      otherRoles: roleTargets.filter((r) => !presets.has(r)).join(", "),
+      samples: Array.from({ length: LIMITS.samples }, (_, i) => samples[i] ?? ""),
+      weights: Object.fromEntries(WEIGHTS.map((w) => [w.key, String(weights[w.key])])) as Record<WeightKey, string>,
+    },
+  };
 }

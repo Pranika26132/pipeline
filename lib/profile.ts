@@ -29,10 +29,36 @@ export const LIMITS = {
   text: 200,
   role: 80,
   roles: 20,
+  // The whole "Other roles" field: 20 roles plus separators.
+  otherRoles: 20 * 82,
   sample: 3000,
   samples: 3,
   weightMax: 10,
 } as const;
+
+// The form's fields as typed, so they can be shown again after an error.
+export type ProfileValues = {
+  school: string;
+  hometown: string;
+  interests: string[];
+  roles: string[];
+  otherRoles: string;
+  samples: string[];
+  weights: Record<WeightKey, string>;
+};
+
+export function readProfileForm(formData: FormData): ProfileValues {
+  const text = (name: string) => String(formData.get(name) ?? "");
+  return {
+    school: text("school"),
+    hometown: text("hometown"),
+    interests: formData.getAll("interests").map(String),
+    roles: formData.getAll("roles").map(String),
+    otherRoles: text("otherRoles"),
+    samples: Array.from({ length: LIMITS.samples }, (_, i) => text(`sample${i}`)),
+    weights: Object.fromEntries(WEIGHTS.map((w) => [w.key, text(w.key)])) as Record<WeightKey, string>,
+  };
+}
 
 export type Profile = {
   school: string | null;

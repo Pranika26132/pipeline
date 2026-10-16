@@ -2,9 +2,32 @@
 
 import { useActionState, useState } from "react";
 
-import { INTERESTS, LIMITS, ROLE_PRESETS, WEIGHTS, type WeightKey } from "@/lib/profile";
+import {
+  INTERESTS,
+  LIMITS,
+  readProfileForm,
+  ROLE_PRESETS,
+  WEIGHTS,
+  type ProfileValues,
+  type WeightKey,
+} from "@/lib/profile";
 
-import { saveProfile, type ProfileState, type ProfileValues } from "./actions";
+import { saveProfile, type ProfileState } from "./actions";
+
+// A dropped connection or an oversized request throws instead of returning
+// an error. Catch it here so the message shows in the form and nothing typed
+// is lost.
+async function save(prev: ProfileState, formData: FormData): Promise<ProfileState> {
+  try {
+    return await saveProfile(prev, formData);
+  } catch {
+    return {
+      submittedAt: Date.now(),
+      values: readProfileForm(formData),
+      error: "Couldn't reach the server, so nothing was saved. Check your connection and try again.",
+    };
+  }
+}
 
 const field =
   "min-h-12 w-full rounded-md border border-rule bg-field px-4 text-base outline-none focus:border-accent focus:ring-2 focus:ring-accent/30";
@@ -14,7 +37,7 @@ const box = "size-5 shrink-0 accent-[var(--accent)]";
 const sectionClass = "mt-10 flex flex-col gap-5 border-t-2 border-foreground pt-6";
 
 export function ProfileForm({ initial }: { initial: ProfileValues }) {
-  const [state, formAction, pending] = useActionState<ProfileState, FormData>(saveProfile, {});
+  const [state, formAction, pending] = useActionState<ProfileState, FormData>(save, {});
   const values = state.values ?? initial;
   // Remount on each result so the fields show what was just submitted.
   const formKey = state.submittedAt ?? 0;
@@ -67,7 +90,13 @@ export function ProfileForm({ initial }: { initial: ProfileValues }) {
           <span className="text-base font-medium">
             Other roles <span className="font-normal text-muted">(separate with commas)</span>
           </span>
-          <input name="otherRoles" defaultValue={values.otherRoles} autoComplete="off" className={field} />
+          <input
+            name="otherRoles"
+            defaultValue={values.otherRoles}
+            maxLength={LIMITS.otherRoles}
+            autoComplete="off"
+            className={field}
+          />
         </label>
       </section>
 
@@ -83,11 +112,14 @@ export function ProfileForm({ initial }: { initial: ProfileValues }) {
         </div>
         {values.samples.map((s, i) => (
           <label key={i} className="flex flex-col gap-2">
-            <span className="text-base font-medium">
-              Sample {i + 1}
-              {i === LIMITS.samples - 1 && <span className="font-normal text-muted"> (optional)</span>}
-            </span>
-            <textarea name={`sample${i}`} defaultValue={s} rows={5} className={`${field} py-3 leading-relaxed`} />
+            <span className="text-base font-medium">Sample {i + 1}</span>
+            <textarea
+              name={`sample${i}`}
+              defaultValue={s}
+              rows={5}
+              maxLength={LIMITS.sample}
+              className={`${field} py-3 leading-relaxed`}
+            />
           </label>
         ))}
       </section>
@@ -96,7 +128,7 @@ export function ProfileForm({ initial }: { initial: ProfileValues }) {
 
       <div className="sticky bottom-0 -mx-4 mt-10 flex flex-col gap-3 border-t border-rule bg-background px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div aria-live="polite" className="empty:hidden">
-          {state.error && (
+          {state.error && !pending && (
             <p role="alert" className="rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
               {state.error}
             </p>

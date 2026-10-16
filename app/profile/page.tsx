@@ -3,10 +3,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-import { LIMITS, ROLE_PRESETS, WEIGHTS, type WeightKey } from "@/lib/profile";
+import { LIMITS, ROLE_PRESETS, WEIGHTS, type ProfileValues, type WeightKey } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 
-import type { ProfileValues } from "./actions";
 import { ProfileForm } from "./profile-form";
 
 export const metadata: Metadata = {
