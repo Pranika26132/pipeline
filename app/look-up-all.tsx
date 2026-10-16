@@ -6,18 +6,31 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import type { EnrichResponse } from "./api/companies/[id]/enrich/route";
 
 type Target = { id: string; name: string };
-type Failure = { id: string; name: string; error: string };
-type Run = { targets: Target[]; done: number; current: string | null; failures: Failure[]; stopped: string | null; finished: boolean };
+type Problem = { id: string; name: string; text: string };
+type Run = {
+  targets: Target[];
+  done: number;
+  current: string | null;
+  failures: Problem[];
+  // Looked up, but with notes (pages that couldn't be read, nobody named).
+  warnings: Problem[];
+  // Looked up meanwhile from somewhere else, so not looked up again.
+  skipped: number;
+  stopped: string | null;
+  finished: boolean;
+};
 
 // Looks up every company that hasn't been looked up, one at a time, through
 // the same route as the button on a company page (so its checks and the
 // one-minute wait apply). Runs while this page is open.
-export function LookUpAll({ pending }: { pending: Target[] }) {
+export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError: string | null }) {
   const router = useRouter();
   const [, startRefresh] = useTransition();
   const [confirming, setConfirming] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const stopRef = useRef(false);
+  // Guards against a second tap starting a second run before the first renders.
+  const runningRef = useRef(false);
 
   // Leaving the page stops the run after the current lookup.
   useEffect(() => () => void (stopRef.current = true), []);
@@ -25,11 +38,13 @@ export function LookUpAll({ pending }: { pending: Target[] }) {
   const running = run !== null && !run.finished;
 
   async function start() {
+    if (runningRef.current) return;
+    runningRef.current = true;
     setConfirming(false);
     stopRef.current = false;
     // A snapshot: the list refreshes during the run, but these are the targets.
     const targets = pending;
-    let state: Run = { targets, done: 0, current: null, failures: [], stopped: null, finished: false };
+    let state: Run = { targets, done: 0, current: null, failures: [], warnings: [], skipped: 0, stopped: null, finished: false };
     const update = (next: Partial<Run>) => {
       state = { ...state, ...next };
       setRun(state);
@@ -45,7 +60,11 @@ export function LookUpAll({ pending }: { pending: Target[] }) {
       let body: EnrichResponse | null = null;
       let status = 0;
       try {
-        const res = await fetch(`/api/companies/${t.id}/enrich`, { method: "POST" });
+        const res = await fetch(`/api/companies/${t.id}/enrich`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ onlyNew: true }),
+        });
         status = res.status;
         body = (await res.json().catch(() => null)) as EnrichResponse | null;
       } catch (e) {
@@ -57,17 +76,29 @@ export function LookUpAll({ pending }: { pending: Target[] }) {
         break;
       }
       if (!body) {
-        update({ failures: [...state.failures, { ...t, error: `The server answered ${status} without a readable result.` }] });
+        update({ failures: [...state.failures, { ...t, text: `The server answered ${status} without a readable result.` }] });
       } else if (!body.ok) {
-        update({ failures: [...state.failures, { ...t, error: body.error }] });
+        update({ failures: [...state.failures, { ...t, text: body.error }] });
+      } else if (body.skipped) {
+        update({ skipped: state.skipped + 1 });
+      } else if (body.notes.length > 0) {
+        update({ warnings: [...state.warnings, { ...t, text: body.notes.join("\n") }] });
       }
       update({ done: state.done + 1 });
       // Show the new score and reasons as each one finishes.
       startRefresh(() => router.refresh());
     }
     update({ current: null, finished: true });
+    runningRef.current = false;
   }
 
+  if (loadError && !run) {
+    return (
+      <p role="alert" className="rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
+        {loadError}
+      </p>
+    );
+  }
   if (pending.length === 0 && !run) return null;
 
   const total = run?.targets.length ?? pending.length;
@@ -122,6 +153,8 @@ export function LookUpAll({ pending }: { pending: Target[] }) {
                 {run.failures.length === 0
                   ? "All looked up."
                   : `Finished. ${run.failures.length} couldn’t be looked up; see below.`}
+                {run.skipped > 0 &&
+                  ` ${run.skipped} ${run.skipped === 1 ? "was" : "were"} already looked up elsewhere, so ${run.skipped === 1 ? "it was" : "they were"} skipped.`}
               </p>
             )}
           </div>
@@ -147,17 +180,14 @@ export function LookUpAll({ pending }: { pending: Target[] }) {
               {run.stopped}
             </p>
           )}
-          {run.failures.length > 0 && (
-            <ul className="flex flex-col divide-y divide-rule border-y border-rule">
-              {run.failures.map((f) => (
-                <li key={f.id} className="flex flex-col gap-1 py-3">
-                  <a href={`/company/${f.id}`} className="font-semibold underline underline-offset-4 wrap-anywhere">
-                    {f.name}
-                  </a>
-                  <span className="text-base text-danger wrap-anywhere whitespace-pre-line">{f.error}</span>
-                </li>
-              ))}
-            </ul>
+          {run.failures.length > 0 && <ProblemList problems={run.failures} tone="text-danger" />}
+          {run.warnings.length > 0 && (
+            <details>
+              <summary className="flex min-h-12 cursor-pointer items-center text-base font-medium underline underline-offset-4">
+                {run.warnings.length} looked up with notes
+              </summary>
+              <ProblemList problems={run.warnings} tone="text-muted" />
+            </details>
           )}
           {run.finished && (
             <button
@@ -171,5 +201,23 @@ export function LookUpAll({ pending }: { pending: Target[] }) {
         </div>
       )}
     </div>
+  );
+}
+
+function ProblemList({ problems, tone }: { problems: Problem[]; tone: string }) {
+  return (
+    <ul className="flex flex-col divide-y divide-rule border-y border-rule">
+      {problems.map((p) => (
+        <li key={p.id} className="flex flex-col py-2">
+          <a
+            href={`/company/${p.id}`}
+            className="flex min-h-12 items-center font-semibold underline underline-offset-4 wrap-anywhere"
+          >
+            {p.name}
+          </a>
+          <span className={`text-base ${tone} wrap-anywhere whitespace-pre-line`}>{p.text}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

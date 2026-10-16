@@ -80,8 +80,8 @@ async function TargetList({ filters }: { filters: Filters }) {
       .order("id")
       .range(0, LIST_LIMIT - 1),
     supabase.from("profiles").select("school, hometown, interests, role_targets, writing_samples").maybeSingle(),
-    // The newest outreach row per company decides its status; none means "to contact".
-    supabase.from("outreach").select("company_id, status").order("created_at", { ascending: false }),
+    // One row per company with outreach (its newest status); none means "to contact".
+    readStatuses(supabase),
     // For "Look up all": oldest first, the order they were added.
     supabase
       .from("companies")
@@ -92,8 +92,7 @@ async function TargetList({ filters }: { filters: Filters }) {
       .limit(LIST_LIMIT),
   ]);
 
-  const statusOf = new Map<string, Status>();
-  for (const o of outreach.data ?? []) if (!statusOf.has(o.company_id)) statusOf.set(o.company_id, o.status as Status);
+  const statusOf = new Map<string, Status>("rows" in outreach ? outreach.rows : []);
   const rows = (companies ?? []).map((c) => {
     const reasons = (Array.isArray(c.score_reasons) ? c.score_reasons : []) as Reason[];
     return {
@@ -104,7 +103,11 @@ async function TargetList({ filters }: { filters: Filters }) {
     };
   });
   const shown = rows.filter((r) => matchesFilters(r, filters));
-  const hiddenContacted = filters.showContacted || filters.status ? 0 : rows.filter((r) => CONTACTED.has(r.status)).length;
+  // How many more the toggle would show with the current chips.
+  const hiddenContacted =
+    filters.showContacted || filters.status
+      ? 0
+      : rows.filter((r) => CONTACTED.has(r.status) && matchesFilters(r, { ...filters, showContacted: true })).length;
 
   return (
     <>
@@ -146,7 +149,7 @@ async function TargetList({ filters }: { filters: Filters }) {
         ) : (
           <p className="text-lg text-muted">
             {count && count > companies.length
-              ? `Showing the top ${companies.length} of ${count} companies, highest score first.`
+              ? `Showing the top ${companies.length} of ${count} companies, highest score first. Filters apply to these.`
               : `${companies.length} ${companies.length === 1 ? "company" : "companies"}, highest score first.`}
           </p>
         )}
@@ -156,18 +159,20 @@ async function TargetList({ filters }: { filters: Filters }) {
         >
           Add companies
         </Link>
-        {notLooked.error ? (
-          <p role="alert" className="rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
-            Couldn’t check which companies still need a lookup ({notLooked.error.message}). Reload to try again.
-          </p>
-        ) : (
-          <LookUpAll pending={notLooked.data} />
-        )}
+        {/* Always rendered, so a refresh that fails mid-run doesn't end the run. */}
+        <LookUpAll
+          pending={notLooked.data ?? []}
+          loadError={
+            notLooked.error
+              ? `Couldn’t check which companies still need a lookup (${notLooked.error.message}). Reload to try again.`
+              : null
+          }
+        />
       </div>
 
-      {outreach.error && (
+      {"error" in outreach && (
         <p role="alert" className="mt-6 rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
-          Couldn’t load contact statuses ({outreach.error.message}), so contacted companies may show. Reload to try again.
+          Couldn’t load contact statuses ({outreach.error}), so contacted companies may show. Reload to try again.
         </p>
       )}
 
@@ -233,6 +238,24 @@ async function TargetList({ filters }: { filters: Filters }) {
       </footer>
     </>
   );
+}
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+// Reads the company_status view page by page: a single read stops at the
+// API's row cap (1000) without an error.
+async function readStatuses(supabase: Supabase): Promise<{ rows: [string, Status][] } | { error: string }> {
+  const rows: [string, Status][] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("company_status")
+      .select("company_id, status")
+      .order("company_id")
+      .range(from, from + 999);
+    if (error) return { error: error.message };
+    for (const r of data) rows.push([r.company_id, r.status as Status]);
+    if (data.length < 1000) return { rows };
+  }
 }
 
 // The number is the row's anchor: big, right-aligned, same width per digit.

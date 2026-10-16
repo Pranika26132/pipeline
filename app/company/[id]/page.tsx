@@ -296,7 +296,12 @@ function FoundOn({ url }: { url: string }) {
   return (
     <span className="text-base text-muted">
       — found on{" "}
-      <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 wrap-anywhere">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex min-h-11 items-center underline underline-offset-4 wrap-anywhere"
+      >
         {pathname === "/" ? "the home page" : pathname}
       </a>
     </span>
