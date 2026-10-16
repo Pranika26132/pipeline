@@ -1,8 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 
 export async function createClient() {
   const cookieStore = await cookies();
+  // Supabase compares the session's expiry with Date.now(), which Next.js
+  // flags during the runtime prefetch unless the render is marked per-request.
+  await connection();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
