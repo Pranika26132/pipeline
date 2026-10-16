@@ -61,7 +61,7 @@ describe("scoreCompany", () => {
     const result = scoreCompany({
       profile: { ...profile, weight_school: 0, weight_hometown: 3 },
       company: emptyCompany,
-      contacts: [person({ school: "Duke", hometown: "Raleigh" })],
+      contacts: [person({ school: "Duke", hometown: "Raleigh, NC" })],
     });
     expect(result.score).toBe(3);
     expect(result.reasons.map((r) => r.factor)).toEqual(["hometown"]);
@@ -110,10 +110,10 @@ describe("scoreCompany", () => {
   it("works with an empty profile: only early stage can count", () => {
     const result = scoreCompany({
       profile: { ...profile, school: null, hometown: null, role_targets: [] },
-      company: { ...emptyCompany, stage: "YC W24", field_sources: { stage: ABOUT } },
+      company: { ...emptyCompany, stage: "Seed", field_sources: { stage: ABOUT } },
       contacts: [person({ school: "Duke", hometown: "Raleigh, NC" })],
     });
-    expect(result.reasons).toEqual([{ factor: "early_stage", points: 1, text: "Early stage: YC W24", source_url: ABOUT }]);
+    expect(result.reasons).toEqual([{ factor: "early_stage", points: 1, text: "Early stage: Seed", source_url: ABOUT }]);
   });
 
   it("decides early stage by headcount first, then funding stage", () => {
@@ -126,6 +126,12 @@ describe("scoreCompany", () => {
     expect(score(null, "Series A")).toBe(1);
     expect(score(null, "Series B")).toBe(0);
     expect(score("a small team", "Pre-seed")).toBe(1);
+    // A YC company can be old and large.
+    expect(score(null, "YC W09")).toBe(0);
+    // Thousands and years aren't small teams.
+    expect(score("1.2k employees", null)).toBe(0);
+    expect(score("1k+ employees", null)).toBe(0);
+    expect(score("Founded in 2015, 30 employees", null)).toBe(1);
   });
 });
 
@@ -141,6 +147,13 @@ describe("schoolsMatch", () => {
     ["Georgia Tech", "Georgia Institute of Technology"],
     ["College of William and Mary", "William & Mary"],
     ["Duke", "Stanford; Duke"],
+    ["Duke", "Duke, Stanford"],
+    ["Duke", "Duke University (BS)"],
+    ["Duke", "Duke '19"],
+    ["MIT", "MIT Sloan"],
+    ["NYU", "NYU Stern School of Business"],
+    ["UC Berkeley", "University of California, Berkeley"],
+    ["The University of Michigan", "UMich"],
   ])("%s matches %s", (mine, theirs) => {
     expect(schoolsMatch(mine, theirs)).toBe(true);
   });
@@ -153,6 +166,11 @@ describe("schoolsMatch", () => {
     ["Penn State", "University of Pennsylvania"],
     ["Columbia", "University of British Columbia"],
     ["", "Duke"],
+    ["Boston College", "Boston University"],
+    ["University of Miami", "Miami University"],
+    ["University of Washington", "Washington University in St. Louis"],
+    ["NYU", "New York Law School"],
+    ["NYU", "New York Medical College"],
   ])("%s does not match %s", (mine, theirs) => {
     expect(schoolsMatch(mine, theirs)).toBe(false);
   });
@@ -161,7 +179,6 @@ describe("schoolsMatch", () => {
 describe("placesMatch", () => {
   it.each([
     ["Raleigh, NC", "Raleigh, North Carolina"],
-    ["Raleigh, North Carolina", "Raleigh"],
     ["raleigh", "Raleigh, NC, USA"],
     ["North Carolina", "Durham, NC"],
     ["NC", "Chapel Hill, North Carolina"],
@@ -175,6 +192,14 @@ describe("placesMatch", () => {
     ["Raleigh, NC", "North Carolina"],
     ["New York", "York, PA"],
     ["", "Raleigh"],
+    // Which Raleigh isn't stated.
+    ["Raleigh, North Carolina", "Raleigh"],
+    ["Portland, OR", "Portland"],
+    // Country codes, not states.
+    ["Indiana", "Mumbai, IN"],
+    ["Delaware", "Berlin, DE"],
+    ["California", "Toronto, CA"],
+    ["Washington", "Perth, WA"],
   ])("%s does not match %s", (mine, theirs) => {
     expect(placesMatch(mine, theirs)).toBe(false);
   });
@@ -190,6 +215,9 @@ describe("roleMatches", () => {
     ["Quant trading", "Trading Intern"],
     ["Quant development", "Quantitative Developer"],
     ["Firmware", "Senior Firmware Engineer"],
+    ["Software engineering", "SWE Intern"],
+    ["Machine learning", "Research Scientist, AI"],
+    ["Quant trading", "Quantitative Trading Intern"],
   ])("%s matches %s", (target, title) => {
     expect(roleMatches(target, title)).toBe(true);
   });
@@ -200,6 +228,10 @@ describe("roleMatches", () => {
     ["Quant research", "User Researcher"],
     ["Machine learning", "Email Marketing Lead"],
     ["Firmware", "Firm Operations"],
+    ["Software engineering", "Software Sales Representative"],
+    ["Machine learning", "Account Executive, AI"],
+    ["Data science", "Marketing Analytics Manager"],
+    ["Quant trading", "Trading Operations Associate"],
   ])("%s does not match %s", (target, title) => {
     expect(roleMatches(target, title)).toBe(false);
   });

@@ -86,39 +86,47 @@ function personReason<C extends ScoreInput["contacts"][number]>(matches: C[], wh
 
 // Schools -----------------------------------------------------------------------
 
-// Words that don't tell schools apart: "Duke" and "Duke University" are the same.
-const SCHOOL_FILLER = new Set(["the", "university", "college", "of", "at", "in", "and", "school"]);
+// "University" and "College" are kept apart from the name: "Duke" matches
+// "Duke University", but "Boston College" isn't "Boston University" and
+// "University of Miami" isn't "Miami University".
+const SCHOOL_TYPES = new Set(["university", "college"]);
+const SCHOOL_FILLER = new Set(["the", "of", "at", "in", "and", "school"]);
+// Degrees and class years say nothing about which school: "Duke '19 (BS)".
+const DEGREE = /^(ba|bs|bse|bsc|ms|msc|ma|mba|meng|mfa|bfa|phd|jd|md|class|alum|alumna|alumnus|alumni|undergrad|undergraduate|grad|\d{2,4})$/;
 // A school within the university still counts: "Duke Law" is Duke.
 const PROGRAM_WORDS = new Set([
   "law", "business", "engineering", "medicine", "medical", "graduate", "management", "divinity", "nursing",
-  "public", "policy", "arts", "sciences", "science", "fuqua", "pratt", "trinity", "sanford", "wharton",
+  "public", "policy", "arts", "sciences", "science", "fuqua", "pratt", "trinity", "sanford", "wharton", "sloan",
+  "stern", "kellogg", "booth", "haas", "ross", "tuck", "kenan", "flagler",
 ]);
 // Common short names, so "MIT" matches "Massachusetts Institute of Technology".
 const SCHOOL_ALIASES: Record<string, string> = {
-  mit: "massachusetts institute technology",
-  cmu: "carnegie mellon",
-  unc: "north carolina chapel hill",
-  "unc chapel hill": "north carolina chapel hill",
-  "nc state": "north carolina state",
-  ncsu: "north carolina state",
-  nyu: "new york",
-  ucla: "california los angeles",
-  "uc berkeley": "california berkeley",
-  berkeley: "california berkeley",
-  "cal berkeley": "california berkeley",
-  usc: "southern california",
-  upenn: "pennsylvania",
-  penn: "pennsylvania",
-  caltech: "california institute technology",
-  "georgia tech": "georgia institute technology",
-  gatech: "georgia institute technology",
-  uiuc: "illinois urbana champaign",
-  "ut austin": "texas austin",
-  umich: "michigan",
+  mit: "massachusetts institute of technology",
+  cmu: "carnegie mellon university",
+  unc: "university of north carolina at chapel hill",
+  "unc chapel hill": "university of north carolina at chapel hill",
+  "nc state": "north carolina state university",
+  ncsu: "north carolina state university",
+  nyu: "new york university",
+  ucla: "university of california los angeles",
+  "uc berkeley": "university of california berkeley",
+  berkeley: "university of california berkeley",
+  "cal berkeley": "university of california berkeley",
+  usc: "university of southern california",
+  upenn: "university of pennsylvania",
+  penn: "university of pennsylvania",
+  caltech: "california institute of technology",
+  "georgia tech": "georgia institute of technology",
+  gatech: "georgia institute of technology",
+  uiuc: "university of illinois urbana champaign",
+  "ut austin": "university of texas at austin",
+  umich: "university of michigan",
 };
 
-function schoolCore(name: string): string[] {
-  const words = name
+type SchoolName = { words: string[]; type: string | null; typeFirst: boolean };
+
+function parseSchool(name: string): SchoolName {
+  let tokens = name
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -129,29 +137,42 @@ function schoolCore(name: string): string[] {
     .replace(/-/g, " ")
     .split(/\s+/)
     .filter(Boolean);
-  const alias = SCHOOL_ALIASES[words.join(" ")];
-  return (alias ? alias.split(" ") : words).filter((w) => !SCHOOL_FILLER.has(w));
+  if (tokens[0] === "the") tokens = tokens.slice(1);
+  const whole = SCHOOL_ALIASES[tokens.join(" ")];
+  if (whole) tokens = whole.split(" ");
+  // "MIT Sloan", "NYU Stern": a short name followed by a program.
+  else if (SCHOOL_ALIASES[tokens[0]]) tokens = [...SCHOOL_ALIASES[tokens[0]].split(" "), ...tokens.slice(1)];
+  const typeAt = tokens.findIndex((w) => SCHOOL_TYPES.has(w));
+  return {
+    words: tokens.filter((w) => !SCHOOL_TYPES.has(w) && !SCHOOL_FILLER.has(w) && !DEGREE.test(w)),
+    type: typeAt === -1 ? null : tokens[typeAt],
+    typeFirst: typeAt === 0,
+  };
 }
 
-// True when both name the same school. A person's school can name a school
-// within the university ("Duke University School of Law"); the profile's
-// school must be the whole of the rest. Several schools in one field
-// ("Duke; Stanford") are checked one by one. "and", "&" and commas aren't
-// separators: "William and Mary", "Texas A&M", "University of California, Berkeley".
+function sameSchool(mine: SchoolName, theirs: SchoolName): boolean {
+  if (mine.words.length === 0 || theirs.words.length < mine.words.length) return false;
+  // Both say what kind of school: it must be the same kind, said the same way.
+  if (mine.type && theirs.type && (mine.type !== theirs.type || mine.typeFirst !== theirs.typeFirst)) return false;
+  for (let start = 0; start + mine.words.length <= theirs.words.length; start++) {
+    if (!mine.words.every((w, i) => theirs.words[start + i] === w)) continue;
+    const rest = [...theirs.words.slice(0, start), ...theirs.words.slice(start + mine.words.length)];
+    if (rest.length === 0) return true;
+    // Extra program words only count when the person's school says it's a
+    // university or college, or the profile doesn't: "New York Law School"
+    // is not NYU.
+    if (rest.every((w) => PROGRAM_WORDS.has(w)) && (theirs.type !== null || mine.type === null)) return true;
+  }
+  return false;
+}
+
+// True when both name the same school. A person's field may list several
+// ("Duke; Stanford", "Duke, Stanford"); the whole field and each part are
+// checked, so "University of California, Berkeley" still reads as one school.
 export function schoolsMatch(profileSchool: string, personSchool: string): boolean {
-  const mine = schoolCore(profileSchool);
-  if (mine.length === 0) return false;
-  return personSchool.split(/[;/|]/).some((part) => {
-    const theirs = schoolCore(part);
-    if (theirs.length < mine.length) return false;
-    for (let start = 0; start + mine.length <= theirs.length; start++) {
-      if (mine.every((w, i) => theirs[start + i] === w)) {
-        const rest = [...theirs.slice(0, start), ...theirs.slice(start + mine.length)];
-        if (rest.every((w) => PROGRAM_WORDS.has(w))) return true;
-      }
-    }
-    return false;
-  });
+  const mine = parseSchool(profileSchool);
+  const parts = [personSchool, ...personSchool.split(/[;/|,]/)];
+  return parts.some((part) => sameSchool(mine, parseSchool(part)));
 }
 
 // Places ------------------------------------------------------------------------
@@ -166,8 +187,12 @@ const US_STATES: Record<string, string> = {
   sd: "south dakota", tn: "tennessee", tx: "texas", ut: "utah", vt: "vermont", va: "virginia", wa: "washington",
   wv: "west virginia", wi: "wisconsin", wy: "wyoming", dc: "district of columbia",
 };
+// State codes that people also write after foreign cities: "Mumbai, IN" is
+// India, "Berlin, DE" Germany, "Toronto, CA" Canada, "Perth, WA" Western
+// Australia. Rarer collisions (NC is also New Caledonia) still expand.
+const AMBIGUOUS_CODES = new Set(["ar", "ca", "co", "de", "id", "il", "in", "ma", "mt", "wa"]);
 
-function placeParts(place: string): string[] {
+function placeParts(place: string, expandAmbiguous: boolean): string[] {
   return place
     .toLowerCase()
     .normalize("NFKD")
@@ -175,42 +200,50 @@ function placeParts(place: string): string[] {
     .split(/[,;]/)
     .map((p) => p.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim())
     .filter((p) => p && p !== "usa" && p !== "us" && p !== "united states")
-    .map((p) => US_STATES[p] ?? p);
+    .map((p) => (US_STATES[p] && (expandAmbiguous || !AMBIGUOUS_CODES.has(p)) ? US_STATES[p] : p));
 }
 
-// "Raleigh, NC" matches "Raleigh, North Carolina" and "Raleigh". A profile
-// that names only a region ("North Carolina", "Bay Area") matches anyone from
-// that region. A city match needs the states to agree when both are given, so
-// Portland, OR isn't Portland, ME. Different cities in the same state don't
-// match a city profile.
+// "Raleigh, NC" matches "Raleigh, North Carolina", but not a bare "Raleigh"
+// (which Raleigh isn't stated) or "Durham, NC". A profile that names only a
+// region ("North Carolina", "Bay Area") matches anyone from that region; a
+// person's code that is also a country code ("Mumbai, IN") only matches the
+// same code, never the state's name.
 export function placesMatch(profilePlace: string, personPlace: string): boolean {
-  const mine = placeParts(profilePlace);
-  const theirs = placeParts(personPlace);
-  if (mine.length === 0 || theirs.length === 0) return false;
-  if (mine.length === 1) return theirs.includes(mine[0]);
-  if (mine[0] !== theirs[0]) return false;
-  const myRest = mine.slice(1);
-  const theirRest = theirs.slice(1);
-  return theirRest.length === 0 || myRest.some((p) => theirRest.includes(p));
+  const mine = placeParts(profilePlace, true);
+  if (mine.length === 0) return false;
+  if (mine.length === 1) {
+    const raw = placeParts(profilePlace, false)[0];
+    return placeParts(personPlace, false).some((p) => p === mine[0] || p === raw);
+  }
+  // Same city: the state codes can be read as states.
+  const theirs = placeParts(personPlace, true);
+  if (theirs.length < 2 || mine[0] !== theirs[0]) return false;
+  return mine.slice(1).some((p) => theirs.slice(1).includes(p));
 }
 
 // Roles -------------------------------------------------------------------------
 
-// Title patterns for the role presets on /profile. A custom role matches a
-// title that contains it as whole words.
-const ROLE_PATTERNS: Record<string, RegExp> = {
-  "Software engineering":
-    /\b(software|swe|back[- ]?end|front[- ]?end|full[- ]?stack|web developer|mobile (engineer|developer)|ios|android|platform engineer|infrastructure engineer)\b/i,
-  "Machine learning": /\b(machine learning|ml|ai|deep learning|computer vision|nlp|llm)\b/i,
-  "Data science": /\b(data scien(ce|tist)|data analyst|data engineer(ing)?|analytics)\b/i,
-  "Quant research": /\bquant(itative)? research(er)?\b/i,
-  "Quant trading": /\b(trader|trading)\b/i,
-  "Quant development": /\b(quant(itative)? (developer|development|dev|engineer)|strategy developer)\b/i,
+// Title patterns for the role presets on /profile: the field and the kind of
+// work, so "Software Sales Representative" isn't software engineering. A
+// custom role matches a title that contains it as whole words.
+const ROLE_PATTERNS: Record<string, RegExp[]> = {
+  "Software engineering": [
+    /\b(software|back[- ]?end|front[- ]?end|full[- ]?stack|web|mobile|ios|android|platform|infrastructure|systems software)\b.*\b(engineer|engineering|developer|development)\b/i,
+    /\bswes?\b/i,
+  ],
+  "Machine learning": [
+    /\b(machine learning|deep learning|computer vision|nlp|ml|ai|llm)\b.*\b(engineer|engineering|researcher|research|scientist)\b/i,
+    /\b(engineer|researcher|scientist)\b.*\b(machine learning|ml|ai)\b/i,
+  ],
+  "Data science": [/\bdata (scien(ce|tist)|analyst|engineer(ing)?)\b/i],
+  "Quant research": [/\bquant(itative)? research(er)?\b/i],
+  "Quant trading": [/\b(traders?|quant(itative)? trading|trading (intern|internship|analyst|associate))\b/i],
+  "Quant development": [/\b(quant(itative)? (developer|development|dev|engineer)|strategy developer)\b/i],
 };
 
 export function roleMatches(target: string, title: string): boolean {
-  const pattern = ROLE_PATTERNS[target];
-  if (pattern) return pattern.test(title);
+  const patterns = ROLE_PATTERNS[target];
+  if (patterns) return patterns.some((p) => p.test(title));
   const words = target.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
   return !!words && new RegExp(`(^|[^\\p{L}\\p{N}])${words}($|[^\\p{L}\\p{N}])`, "iu").test(title);
 }
@@ -234,8 +267,22 @@ function roleReason(openRoles: unknown, targets: string[]) {
 // Early stage ---------------------------------------------------------------------
 
 const EARLY_MAX_PEOPLE = 50;
-const EARLY_STAGES = /\b(pre[- ]?seed|seed|series a|angel|y ?combinator|yc ?[wsfx]?\d{2,4}|yc)\b/i;
+// YC isn't here: a YC company can be ten years old and large.
+const EARLY_STAGES = /\b(pre[- ]?seed|seed|series a|angel)\b/i;
 const LATE_STAGES = /\b(series [b-z]|public|ipo|acquired|nasdaq|nyse)\b/i;
+
+// Headcounts stated in a size text: "11-50" -> [11, 50], "1.2k" -> [1200].
+// Years ("Founded 2015, 30 people") are not headcounts.
+export function headcounts(size: string): number[] {
+  const out: number[] = [];
+  for (const m of size.replace(/(\d),(\d{3})/g, "$1$2").matchAll(/(\d+(?:\.\d+)?)\s*(k|thousand)?\b/gi)) {
+    const n = Number(m[1]) * (m[2] ? 1000 : 1);
+    const before = size.slice(0, m.index).toLowerCase();
+    if (!m[2] && n >= 1900 && n <= 2099 && /\b(founded|since|established|est|in)\.?\s*$/.test(before)) continue;
+    out.push(n);
+  }
+  return out;
+}
 
 function earlyStageReason(company: ScoreInput["company"]) {
   const sources = isObject(company.field_sources) ? company.field_sources : {};
@@ -243,7 +290,7 @@ function earlyStageReason(company: ScoreInput["company"]) {
   const size = company.size?.trim();
   const sizeSource = sources.size;
   if (size && isHttpUrl(sizeSource)) {
-    const numbers = [...size.replace(/,/g, "").matchAll(/\d+/g)].map((m) => Number(m[0]));
+    const numbers = headcounts(size);
     if (numbers.length > 0) {
       const most = Math.max(...numbers);
       // "200+" or "1,000 employees" is not small, whatever else is stated.
