@@ -16,14 +16,41 @@ export const ROLE_PRESETS = [
   "Quant development",
 ] as const;
 
-export const WEIGHTS = [
-  { key: "weight_school", label: "Someone on the team went to my school", fallback: 3 },
-  { key: "weight_hometown", label: "Someone on the team is from my hometown or region", fallback: 2 },
-  { key: "weight_open_role", label: "They have an open role I'm targeting", fallback: 2 },
-  { key: "weight_early_stage", label: "Early stage (under about 50 people)", fallback: 1 },
+// How much each factor counts, as three plain choices. Each factor maps the
+// choices to its own points so the defaults equal SPEC.md (school 3,
+// hometown 2, open role 2, early stage 1). The database stores the points.
+export const LEVELS = [
+  { value: "none", label: "Doesn't matter" },
+  { value: "matters", label: "Matters" },
+  { value: "a_lot", label: "Matters a lot" },
 ] as const;
 
+export type Level = (typeof LEVELS)[number]["value"];
+
+export const WEIGHTS = [
+  { key: "weight_school", label: "Founder or team went to my school", points: { none: 0, matters: 2, a_lot: 3 }, fallback: "a_lot" },
+  { key: "weight_hometown", label: "Founder or team is from my hometown", points: { none: 0, matters: 2, a_lot: 3 }, fallback: "matters" },
+  { key: "weight_open_role", label: "Hiring for a role I want", points: { none: 0, matters: 2, a_lot: 3 }, fallback: "matters" },
+  { key: "weight_early_stage", label: "Small, early-stage company", points: { none: 0, matters: 1, a_lot: 2 }, fallback: "matters" },
+] as const satisfies readonly { key: string; label: string; points: Record<Level, number>; fallback: Level }[];
+
 export type WeightKey = (typeof WEIGHTS)[number]["key"];
+
+export function isLevel(value: string): value is Level {
+  return LEVELS.some((l) => l.value === value);
+}
+
+// Stored points back to a choice. Any other number (e.g. set through the API)
+// shows as the nearest choice; ties go to the higher one.
+export function levelFor(key: WeightKey, points: number | null | undefined): Level {
+  const w = WEIGHTS.find((x) => x.key === key)!;
+  if (points == null) return w.fallback;
+  let best: Level = "none";
+  for (const l of LEVELS) {
+    if (Math.abs(w.points[l.value] - points) <= Math.abs(w.points[best] - points)) best = l.value;
+  }
+  return best;
+}
 
 export const LIMITS = {
   text: 200,
@@ -33,7 +60,6 @@ export const LIMITS = {
   otherRoles: 20 * 82,
   sample: 3000,
   samples: 3,
-  weightMax: 10,
 } as const;
 
 // The form's fields as typed, so they can be shown again after an error.
@@ -44,6 +70,7 @@ export type ProfileValues = {
   roles: string[];
   otherRoles: string;
   samples: string[];
+  // A Level per factor, as submitted.
   weights: Record<WeightKey, string>;
 };
 

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import {
   INTERESTS,
+  isLevel,
   LIMITS,
   readProfileForm,
   ROLE_PRESETS,
@@ -64,12 +65,9 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
 
   const weights = {} as Record<WeightKey, number>;
   for (const w of WEIGHTS) {
-    const raw = values.weights[w.key].trim();
-    const n = Number(raw);
-    if (!/^\d+$/.test(raw) || n > LIMITS.weightMax) {
-      return fail(`Points for "${w.label}" must be a whole number from 0 to ${LIMITS.weightMax}.`);
-    }
-    weights[w.key] = n;
+    const level = values.weights[w.key];
+    if (!isLevel(level)) return fail(`Choose how much "${w.label}" matters.`);
+    weights[w.key] = w.points[level];
   }
 
   // RLS limits this to the signed-in user's own row.
@@ -102,7 +100,7 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
       roles: presetRoles,
       otherRoles: roleTargets.filter((r) => !presets.has(r)).join(", "),
       samples: Array.from({ length: LIMITS.samples }, (_, i) => samples[i] ?? ""),
-      weights: Object.fromEntries(WEIGHTS.map((w) => [w.key, String(weights[w.key])])) as Record<WeightKey, string>,
+      weights: values.weights,
     },
   };
 }

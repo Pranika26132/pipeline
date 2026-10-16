@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 
 import {
   INTERESTS,
+  LEVELS,
   LIMITS,
   readProfileForm,
   ROLE_PRESETS,
@@ -106,13 +107,14 @@ export function ProfileForm({ initial }: { initial: ProfileValues }) {
             Your writing
           </h2>
           <p className="text-base text-muted">
-            Paste two or three things you wrote yourself, such as an email or a cover letter paragraph. Drafts follow their
-            tone. Up to {LIMITS.sample.toLocaleString()} characters each.
+            Paste a couple of emails or messages you’ve written. Drafts will copy your tone so they sound like you, not AI.
           </p>
         </div>
         {values.samples.map((s, i) => (
           <label key={i} className="flex flex-col gap-2">
-            <span className="text-base font-medium">Sample {i + 1}</span>
+            <span className="text-base font-medium">
+              Sample {i + 1} <span className="font-normal text-muted">(optional)</span>
+            </span>
             <textarea
               name={`sample${i}`}
               defaultValue={s}
@@ -150,55 +152,57 @@ export function ProfileForm({ initial }: { initial: ProfileValues }) {
 
 function Weights({ initial }: { initial: Record<WeightKey, string> }) {
   const [weights, setWeights] = useState(initial);
-  const defaults = Object.fromEntries(WEIGHTS.map((w) => [w.key, String(w.fallback)])) as Record<WeightKey, string>;
+  const defaults = Object.fromEntries(WEIGHTS.map((w) => [w.key, w.fallback])) as Record<WeightKey, string>;
   const isDefault = WEIGHTS.every((w) => weights[w.key] === defaults[w.key]);
 
+  // Closed by default. Its choices are submitted with the form either way.
   return (
-    <section aria-labelledby="scoring" className={sectionClass}>
-      <div className="flex flex-col gap-2">
-        <h2 id="scoring" className="text-xl font-semibold">
-          How companies are scored
-        </h2>
+    <details className="group mt-10 border-t-2 border-foreground pt-2">
+      <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
+        <span className="flex flex-col">
+          <span className="text-xl font-semibold">Customize ranking</span>
+          <span className="text-sm text-muted">{isDefault ? "Using the standard ranking" : "You’ve changed the ranking"}</span>
+        </span>
+        <span aria-hidden className="text-2xl leading-none transition-transform group-open:rotate-45 motion-reduce:transition-none">
+          +
+        </span>
+      </summary>
+      <div className="flex flex-col gap-6 pt-4 pb-2">
         <p className="text-base text-muted">
-          A company’s score is the sum of the points below for each thing found on its own pages. Use 0 to ignore one.
+          Choose what moves a company up your list. Each is checked only against what the company’s own pages say.
         </p>
-      </div>
-      <ul className="flex flex-col divide-y divide-rule border-y border-rule">
         {WEIGHTS.map((w) => (
-          <li key={w.key}>
-            <label className="flex min-h-16 items-center justify-between gap-4 py-3">
-              <span className="text-base">
-                {w.label}
-                <span className="block text-sm text-muted">Default {w.fallback}</span>
-              </span>
-              <span className="flex shrink-0 items-center gap-2">
-                <input
-                  name={w.key}
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  max={LIMITS.weightMax}
-                  step={1}
-                  value={weights[w.key]}
-                  onChange={(e) => setWeights({ ...weights, [w.key]: e.target.value })}
-                  className={`${field} w-20 text-center text-lg font-semibold tabular-nums`}
-                />
-                <span className="text-sm text-muted" aria-hidden>
-                  pts
-                </span>
-              </span>
-            </label>
-          </li>
+          <fieldset key={w.key} className="flex flex-col gap-2">
+            <legend className="mb-2 text-base font-medium">{w.label}</legend>
+            <div className="grid grid-cols-3 gap-2">
+              {LEVELS.map((l) => (
+                <label
+                  key={l.value}
+                  className="flex min-h-12 cursor-pointer items-center justify-center rounded-md border border-rule bg-field px-2 py-2 text-center text-sm leading-tight has-[:checked]:border-accent has-[:checked]:bg-accent has-[:checked]:font-semibold has-[:checked]:text-accent-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent sm:text-base"
+                >
+                  <input
+                    type="radio"
+                    name={w.key}
+                    value={l.value}
+                    checked={weights[w.key] === l.value}
+                    onChange={() => setWeights({ ...weights, [w.key]: l.value })}
+                    className="sr-only"
+                  />
+                  {l.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
         ))}
-      </ul>
-      <button
-        type="button"
-        onClick={() => setWeights(defaults)}
-        disabled={isDefault}
-        className="-ml-2 flex min-h-12 w-fit items-center px-2 text-base font-medium underline underline-offset-4 disabled:no-underline disabled:opacity-50"
-      >
-        Use the defaults
-      </button>
-    </section>
+        <button
+          type="button"
+          onClick={() => setWeights(defaults)}
+          disabled={isDefault}
+          className="-ml-2 flex min-h-12 w-fit items-center px-2 text-base font-medium underline underline-offset-4 disabled:no-underline disabled:opacity-50"
+        >
+          Use the standard ranking
+        </button>
+      </div>
+    </details>
   );
 }

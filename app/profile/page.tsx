@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-import { LIMITS, ROLE_PRESETS, WEIGHTS, type ProfileValues, type WeightKey } from "@/lib/profile";
+import { levelFor, LIMITS, ROLE_PRESETS, WEIGHTS, type ProfileValues, type WeightKey } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 
 import { ProfileForm } from "./profile-form";
@@ -58,7 +58,7 @@ async function Profile() {
     otherRoles: roles.filter((r: string) => !presets.has(r)).join(", "),
     samples: Array.from({ length: LIMITS.samples }, (_, i) => samples[i] ?? ""),
     weights: Object.fromEntries(
-      WEIGHTS.map((w) => [w.key, String(data?.[w.key] ?? w.fallback)]),
+      WEIGHTS.map((w) => [w.key, levelFor(w.key, data?.[w.key])]),
     ) as Record<WeightKey, string>,
   };
 
