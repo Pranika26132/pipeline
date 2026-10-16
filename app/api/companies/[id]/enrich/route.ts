@@ -16,7 +16,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const COOLDOWN_MS = maxDuration * 1000;
 
 export type EnrichResponse =
-  | { ok: true; people: number; roles: number; notes: string[] }
+  // `skipped`: asked to look up only a never-looked-up company, and it had been.
+  | { ok: true; skipped?: boolean; people: number; roles: number; notes: string[] }
   | { ok: false; error: string };
 
 // Last line of defense: no key reaches the page or the database, even if a
@@ -59,25 +60,39 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   // RLS returns nothing for another user's company.
   const { data: company, error: loadError } = await supabase
     .from("companies")
-    .select("id, name, url, domain, summary, stage, size, field_sources, open_roles")
+    .select("id, name, url, domain, summary, stage, size, field_sources, open_roles, facts_version")
     .eq("id", id)
     .maybeSingle();
   if (loadError) return fail(500, `Couldn't load the company (${loadError.message}).`);
   if (!company) return fail(404, "That company isn't in your list.");
 
+  // "Look up all" sends { onlyNew: true }: a company looked up meanwhile (say,
+  // from another tab) is skipped rather than looked up again.
+  const options = (await req.json().catch(() => null)) as { onlyNew?: unknown } | null;
+  const onlyNew = options?.onlyNew === true;
+
   // Claims the run in one conditional update, so two quick clicks can't both start.
   const now = Date.now();
   const cutoff = new Date(now - COOLDOWN_MS).toISOString();
-  const { data: claimed, error: claimError } = await supabase
-    .from("companies")
-    .update({ enriched_at: new Date(now).toISOString() })
-    .eq("id", id)
-    .or(`enriched_at.is.null,enriched_at.lt.${cutoff}`)
-    .select("id");
+  const claim = supabase.from("companies").update({ enriched_at: new Date(now).toISOString() }).eq("id", id);
+  const { data: claimed, error: claimError } = await (onlyNew
+    ? claim.is("enriched_at", null)
+    : claim.or(`enriched_at.is.null,enriched_at.lt.${cutoff}`)
+  ).select("id");
   if (claimError) return fail(500, `Couldn't start the lookup (${claimError.message}).`);
   if (claimed.length === 0) {
+    if (onlyNew) {
+      return Response.json({ ok: true, skipped: true, people: 0, roles: 0, notes: [] } satisfies EnrichResponse);
+    }
     return fail(429, "This company was looked up less than a minute ago. Wait a minute, then try again.");
   }
+
+  // A failed lookup still gets a score from what earlier lookups saved, so the
+  // list doesn't show it as unscored. Returns text to add to the error.
+  const rescoreAfterFailure = async () => {
+    const scored = await rescore(supabase, id);
+    return scored.error ? `\nThe score couldn't be updated either. ${scored.error}` : "";
+  };
 
   const startUrl = company.url ?? `https://${company.domain}/`;
   let collected;
@@ -96,7 +111,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       .update({ needs_manual_info: true, enrich_error: safe(error) })
       .eq("id", id);
     if (saved.error) return fail(500, `${error}\nAlso couldn't save this result (${saved.error.message}).`);
-    return fail(502, error);
+    return fail(502, error + (await rescoreAfterFailure()));
   }
 
   let result;
@@ -107,7 +122,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     // Keep the company row as it was; record the failure so the page shows it.
     const saved = await supabase.from("companies").update({ enrich_error: safe(error) }).eq("id", id);
     if (saved.error) return fail(500, `${error}\nAlso couldn't save this result (${saved.error.message}).`);
-    return fail(502, error);
+    return fail(502, error + (await rescoreAfterFailure()));
   }
 
   // Add people not already saved for this company. Existing contacts, which
@@ -136,21 +151,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   }
   const oldRoles = Array.isArray(company.open_roles) ? company.open_roles : [];
 
-  const update = await supabase
-    .from("companies")
-    .update({
-      summary: result.summary?.value ?? company.summary,
-      stage: result.stage?.value ?? company.stage,
-      size: result.size?.value ?? company.size,
-      field_sources: fieldSources,
-      open_roles: result.open_roles.length > 0 ? result.open_roles : oldRoles,
-      // Flagged while the company has nobody to write to.
-      needs_manual_info: existing.length + fresh.length === 0,
-      enrich_error: notes.length ? safe(notes.join("\n")) : null,
-    })
-    .eq("id", id);
-  if (update.error) return fail(500, `Couldn't save what was found (${update.error.message}).`);
-
+  // People first, then the company facts with a new facts_version: a score
+  // computed from the old facts (say, by a profile save running now) is then
+  // refused by set_company_scores instead of overwriting the new one.
   if (fresh.length > 0) {
     const insert = await supabase.from("contacts").insert(
       fresh.map((p) => ({
@@ -165,10 +168,29 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     if (insert.error) {
       const message =
         insert.error.code === "23505"
-          ? "Saved the company details, but some of these people were added by another lookup at the same time. Reload to see them."
-          : `Saved the company details but not the people (${insert.error.message}).`;
-      return fail(500, message);
+          ? "Some of these people were added by another lookup at the same time, so nothing was saved. Reload, then look up again."
+          : `Couldn't save the people found (${insert.error.message}). Nothing was saved.`;
+      return fail(500, message + (await rescoreAfterFailure()));
     }
+  }
+
+  const update = await supabase
+    .from("companies")
+    .update({
+      summary: result.summary?.value ?? company.summary,
+      stage: result.stage?.value ?? company.stage,
+      size: result.size?.value ?? company.size,
+      field_sources: fieldSources,
+      open_roles: result.open_roles.length > 0 ? result.open_roles : oldRoles,
+      // Flagged while the company has nobody to write to.
+      needs_manual_info: existing.length + fresh.length === 0,
+      enrich_error: notes.length ? safe(notes.join("\n")) : null,
+      facts_version: company.facts_version + 1,
+    })
+    .eq("id", id);
+  if (update.error) {
+    const saved = fresh.length > 0 ? "The people found were saved, but not the company details" : "Couldn't save what was found";
+    return fail(500, `${saved} (${update.error.message}).` + (await rescoreAfterFailure()));
   }
 
   // The score reads the facts just saved.
