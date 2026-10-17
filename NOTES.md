@@ -136,6 +136,47 @@ Known limits:
   - The form's Save goes through a small browser-side wrapper, so it needs JavaScript; a plain form post without JS no longer saves. The save was tested by calling the action with React's own `encodeReply`, as the browser does.
 - Known: `updated_at` is set by the app, not a trigger; nothing reads it yet. Saving the profile doesn't rescore companies yet; that comes with `feature/scoring`.
 
+## Finished (branch `feature/scoring`, 2026-10-16)
+- `lib/scoring.ts` `scoreCompany`: a plain weighted sum of four factors (school, hometown, open role, early stage), using the profile's weights. Each factor counts once and only from a fact enrichment saved with an http(s) source page. Each reason has plain text, its points and `source_url`; the strongest comes first.
+- Matching:
+  - **School:** "Duke" matches "Duke University", "Duke Law" and "Duke '19 (BS)". Short names cover MIT, UNC, NYU, CMU, UC Berkeley and similar. "University"/"College" and their position must agree when both sides say them, so Boston College isn't Boston University and University of Miami isn't Miami University. NYU doesn't match New York Law School.
+  - **Place:** "Raleigh, NC" matches "Raleigh, North Carolina". A region-only profile ("North Carolina") matches anyone from there. A bare "Raleigh" doesn't match a city with a state, because which Raleigh isn't stated. Codes people also use for countries (IN, DE, CA, WA, IL, ...) aren't read as US states on the person's side.
+  - **Roles:** presets need both the field and the kind of work ("Software Sales Representative" isn't software engineering). Custom roles match as whole words.
+  - **Early stage:** a stated headcount of 50 or fewer decides first ("1.2k" and "200+" are large; years are ignored). Otherwise pre-seed, seed, Series A or angel. YC alone doesn't count, since old YC companies are large.
+- `lib/rescore.ts` recomputes and saves through `set_company_scores(jsonb)`:
+  - Runs for one company after each lookup (including failed ones) and for all companies after each profile save.
+  - Each score carries the `facts_version` and profile `updated_at` it was computed from. The function only writes rows where both still match, and skipped rows are retried up to 3 times. This stops a profile save during a lookup from leaving a stale score.
+  - The lookup saves people first, then the facts with `facts_version + 1`.
+- Migrations, applied through the Supabase MCP (remote versions match the filenames):
+  - `20261016192230_company_scores.sql`: `set_company_scores` (security invoker, empty search_path, execute only for authenticated), a check that `score_reasons` is an array, and an index on `(user_id, score desc nulls last, created_at desc)`.
+  - `20261016193736_company_score_versions.sql`: `companies.facts_version`; the function writes only when the versions match.
+  - `20261016193749_company_status_view.sql`: view `company_status` (`security_invoker = true`, select only for authenticated) giving the newest outreach status per company.
+  - No new policies: the function and view run with the caller's rights, so the existing per-user RLS applies.
+- `/`:
+  - Sorted by score; companies not looked up go last. Each row shows the score and its top reason.
+  - Filter chips (Alumni, Hometown, Role open; Status) live in the URL. Contacted companies (sent and later) are hidden by default, with a toggle that shows how many.
+  - Filters apply to the top 500, and the page says so when there are more.
+- "Look up all":
+  - Looks up every company not looked up yet, one at a time in the browser, with "N of M done", a progress bar, Stop, and errors per company. Lookups with notes are listed in a closed section.
+  - The list refreshes after each one, so scores appear as they finish.
+  - Calls the lookup route with `{ onlyNew: true }`, so a company looked up meanwhile is skipped rather than looked up again. Asks once before starting, because each lookup is a Claude call.
+- `/company/[id]`: "Why it ranks here" shows the total and every reason with its points and a "found on /path" link.
+- Tests (vitest, 102 total): scoring, school/place/role/size matching (including every false match the review found), filters, and profile weights.
+- Tested by script with throwaway users (deleted afterwards): a profile save rescored seeded companies (8/0/3/not looked up); list order, hidden contacted, chips and company-page reasons all checked; stale-version writes refused (0 rows) and current ones accepted; `onlyNew` skipped a looked-up company; a failed lookup got score 0; a real lookup of oxide.computer saved score 2 with a sourced role reason.
+- Fresh-context review: RLS and the function were fine. Fixed:
+  - false matches (school type words, country codes, bare city, one-word roles, "1.2k", YC);
+  - stale-score races;
+  - "Look up all" double start, repeat lookups, a refresh ending the run, and notes not shown;
+  - the outreach read cut off at 1000 rows;
+  - the contacted count ignoring chips;
+  - "Not scored yet" after a failed lookup;
+  - small tap targets.
+- Known:
+  - Companies looked up before this branch show "Not scored yet" until the profile is saved once.
+  - Statuses are all "To contact" until drafting and status tracking exist.
+  - "Look up all" runs only while the page is open.
+- SPEC.md: Discover is now Saturday morning, before drafts. All matches start ticked, "Add all" adds the ticked ones, and added companies go into the same lookup queue.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.

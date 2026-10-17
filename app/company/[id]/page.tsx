@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 
 import { redactSecrets } from "@/lib/redact";
+import type { Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
 import { LocalDate } from "../../local-date";
@@ -44,7 +45,7 @@ async function Company({ id }: { id: string }) {
   const [companyResult, contactsResult] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error")
+      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -114,7 +115,13 @@ async function Company({ id }: { id: string }) {
         )}
       </section>
 
-      <section aria-labelledby="about" className="mt-8 border-t-2 border-foreground pt-6">
+      <ScoreSection
+        score={company.score}
+        reasons={(Array.isArray(company.score_reasons) ? company.score_reasons : []) as Reason[]}
+        lookedUp={!!company.enriched_at}
+      />
+
+      <section aria-labelledby="about" className="mt-10 border-t-2 border-foreground pt-6">
         <h2 id="about" className="text-xl font-semibold">
           About
         </h2>
@@ -237,6 +244,67 @@ function SourceLink({ url }: { url?: string | null }) {
     >
       (source: {pathname === "/" ? "home page" : pathname})
     </a>
+  );
+}
+
+// Every reason, with its points and the page it came from.
+function ScoreSection({ score, reasons, lookedUp }: { score: number | null; reasons: Reason[]; lookedUp: boolean }) {
+  return (
+    <section aria-labelledby="score" className="mt-8 border-t-2 border-foreground pt-6">
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 id="score" className="text-2xl font-semibold tracking-[-0.02em]">
+          Why it ranks here
+        </h2>
+        {score !== null && (
+          <p className="shrink-0 text-right">
+            <span className="text-4xl font-bold tabular-nums tracking-[-0.03em]">{score}</span>{" "}
+            <span className="text-base text-muted">{score === 1 ? "point" : "points"}</span>
+          </p>
+        )}
+      </div>
+      {!lookedUp ? (
+        <p className="mt-3 text-lg text-muted">Look up the company to score it.</p>
+      ) : score === null ? (
+        <p className="mt-3 text-lg text-muted">
+          Not scored yet. <Link href="/profile" className="underline underline-offset-4">Save your profile</Link> to score
+          your list.
+        </p>
+      ) : reasons.length === 0 ? (
+        <p className="mt-3 text-lg text-muted">
+          Nothing on its pages matched <Link href="/profile" className="underline underline-offset-4">your profile</Link>.
+        </p>
+      ) : (
+        <ul className="mt-4 flex flex-col divide-y divide-rule border-y border-rule">
+          {reasons.map((r, i) => (
+            <li key={i} className="grid grid-cols-[3rem_1fr] gap-x-3 py-3">
+              <span className="text-lg font-semibold tabular-nums text-accent">+{r.points}</span>
+              <span className="text-lg">
+                <span className="wrap-anywhere">{r.text}</span> <FoundOn url={r.source_url} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function FoundOn({ url }: { url: string }) {
+  const href = safeHref(url);
+  if (!href) return null;
+  const { pathname } = new URL(href);
+  return (
+    <span className="text-base text-muted">
+      — found on{" "}
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex min-h-11 items-center underline underline-offset-4 wrap-anywhere"
+      >
+        {pathname === "/" ? "the home page" : pathname}
+      </a>
+    </span>
   );
 }
 

@@ -2,14 +2,28 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import {
+  CONTACTED,
+  FACTOR_CHIPS,
+  filtersHref,
+  isFiltered,
+  matchesFilters,
+  STATUSES,
+  toggleFactor,
+  parseFilters,
+  type Filters,
+  type Status,
+} from "@/lib/list-filters";
 import { isProfileEmpty } from "@/lib/profile";
+import type { Factor, Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
+import { LookUpAll } from "./look-up-all";
 import { SignOutButton } from "./sign-out-button";
 
 const LIST_LIMIT = 500;
 
-export default function Home() {
+export default function Home({ searchParams }: PageProps<"/">) {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pt-10 pb-10 sm:pt-16">
       <div className="flex items-start justify-between gap-4">
@@ -22,14 +36,16 @@ export default function Home() {
         </Link>
       </div>
       <Suspense fallback={<p className="mt-6 text-lg text-muted">Loading your companies…</p>}>
-        <TargetList />
+        {searchParams.then((params) => (
+          <TargetList filters={parseFilters(params)} />
+        ))}
       </Suspense>
     </main>
   );
 }
 
 // Reads the session and the list at request time, behind the boundary.
-async function TargetList() {
+async function TargetList({ filters }: { filters: Filters }) {
   const supabase = await createClient();
   const { data: auth, error: authError } = await supabase.auth.getClaims();
   if (authError) {
@@ -52,17 +68,46 @@ async function TargetList() {
   }
 
   // RLS limits both to the signed-in user's rows.
-  const [{ data: companies, error, count }, profileResult] = await Promise.all([
+  const [{ data: companies, error, count }, profileResult, outreach, notLooked] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, name, domain, needs_manual_info", { count: "exact" })
+      .select("id, name, domain, needs_manual_info, score, score_reasons, enriched_at", { count: "exact" })
+      // Highest score first; companies not looked up yet go last.
+      .order("score", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       // A CSV import saves every row with the same timestamp; list those A to Z.
       .order("name")
       .order("id")
       .range(0, LIST_LIMIT - 1),
     supabase.from("profiles").select("school, hometown, interests, role_targets, writing_samples").maybeSingle(),
+    // One row per company with outreach (its newest status); none means "to contact".
+    readStatuses(supabase),
+    // For "Look up all": oldest first, the order they were added.
+    supabase
+      .from("companies")
+      .select("id, name")
+      .is("enriched_at", null)
+      .order("created_at")
+      .order("name")
+      .limit(LIST_LIMIT),
   ]);
+
+  const statusOf = new Map<string, Status>("rows" in outreach ? outreach.rows : []);
+  const rows = (companies ?? []).map((c) => {
+    const reasons = (Array.isArray(c.score_reasons) ? c.score_reasons : []) as Reason[];
+    return {
+      ...c,
+      reasons,
+      factors: reasons.map((r) => r.factor) as Factor[],
+      status: statusOf.get(c.id) ?? ("to_contact" as Status),
+    };
+  });
+  const shown = rows.filter((r) => matchesFilters(r, filters));
+  // How many more the toggle would show with the current chips.
+  const hiddenContacted =
+    filters.showContacted || filters.status
+      ? 0
+      : rows.filter((r) => CONTACTED.has(r.status) && matchesFilters(r, { ...filters, showContacted: true })).length;
 
   return (
     <>
@@ -104,8 +149,8 @@ async function TargetList() {
         ) : (
           <p className="text-lg text-muted">
             {count && count > companies.length
-              ? `Showing the newest ${companies.length} of ${count} companies.`
-              : `${companies.length} ${companies.length === 1 ? "company" : "companies"}, newest first.`}
+              ? `Showing the top ${companies.length} of ${count} companies, highest score first. Filters apply to these.`
+              : `${companies.length} ${companies.length === 1 ? "company" : "companies"}, highest score first.`}
           </p>
         )}
         <Link
@@ -114,31 +159,73 @@ async function TargetList() {
         >
           Add companies
         </Link>
+        {/* Always rendered, so a refresh that fails mid-run doesn't end the run. */}
+        <LookUpAll
+          pending={notLooked.data ?? []}
+          loadError={
+            notLooked.error
+              ? `Couldn’t check which companies still need a lookup (${notLooked.error.message}). Reload to try again.`
+              : null
+          }
+        />
       </div>
 
-      {companies && companies.length > 0 && (
-        <ul className="mt-8 flex flex-col border-t-2 border-foreground">
-          {companies.map((c) => (
-            <li key={c.id} className="border-b border-rule">
+      {"error" in outreach && (
+        <p role="alert" className="mt-6 rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
+          Couldn’t load contact statuses ({outreach.error}), so contacted companies may show. Reload to try again.
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <>
+          <FilterBar filters={filters} hiddenContacted={hiddenContacted} />
+          {shown.length === 0 ? (
+            <div className="mt-6 flex flex-col gap-3">
+              <p className="text-lg">No companies match these filters.</p>
               <Link
-                href={`/company/${c.id}`}
-                className="-mx-2 flex min-h-16 items-center justify-between gap-4 rounded-md px-2 py-3 hover:bg-field focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
+                href={filtersHref({ ...filters, factors: [], status: null })}
+                className="-ml-2 flex min-h-12 w-fit items-center px-2 text-base font-medium underline underline-offset-4"
               >
-                <span className="min-w-0">
-                  <span className="block text-lg font-semibold wrap-anywhere">{c.name}</span>
-                  {c.name !== c.domain && (
-                    <span className="block text-base text-muted wrap-anywhere">{c.domain}</span>
-                  )}
-                </span>
-                {c.needs_manual_info && (
-                  <span className="shrink-0 rounded-sm border border-danger px-2 py-0.5 text-sm font-medium text-danger">
-                    Needs info
-                  </span>
-                )}
+                Clear filters
               </Link>
-            </li>
-          ))}
-        </ul>
+            </div>
+          ) : (
+            <ul className="mt-6 flex flex-col border-t-2 border-foreground">
+              {shown.map((c) => (
+                <li key={c.id} className="border-b border-rule">
+                  <Link
+                    href={`/company/${c.id}`}
+                    className="-mx-2 grid min-h-16 grid-cols-[1fr_auto] items-center gap-x-4 rounded-md px-2 py-3 hover:bg-field focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
+                  >
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="text-lg font-semibold wrap-anywhere">{c.name}</span>
+                      {c.reasons[0] ? (
+                        <span className="text-base text-muted wrap-anywhere">{c.reasons[0].text}</span>
+                      ) : (
+                        c.name !== c.domain && <span className="text-base text-muted wrap-anywhere">{c.domain}</span>
+                      )}
+                      {(c.needs_manual_info || c.status !== "to_contact") && (
+                        <span className="mt-1 flex flex-wrap gap-2">
+                          {c.status !== "to_contact" && (
+                            <span className="rounded-sm border border-foreground px-2 py-0.5 text-sm font-medium">
+                              {STATUSES.find((s) => s.value === c.status)?.label}
+                            </span>
+                          )}
+                          {c.needs_manual_info && (
+                            <span className="rounded-sm border border-danger px-2 py-0.5 text-sm font-medium text-danger">
+                              Needs info
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </span>
+                    <Score score={c.score} lookedUp={!!c.enriched_at} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       {/* Pushes the account footer to the bottom on short lists. */}
@@ -150,6 +237,101 @@ async function TargetList() {
         <SignOutButton />
       </footer>
     </>
+  );
+}
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+// Reads the company_status view page by page: a single read stops at the
+// API's row cap (1000) without an error.
+async function readStatuses(supabase: Supabase): Promise<{ rows: [string, Status][] } | { error: string }> {
+  const rows: [string, Status][] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("company_status")
+      .select("company_id, status")
+      .order("company_id")
+      .range(from, from + 999);
+    if (error) return { error: error.message };
+    for (const r of data) rows.push([r.company_id, r.status as Status]);
+    if (data.length < 1000) return { rows };
+  }
+}
+
+// The number is the row's anchor: big, right-aligned, same width per digit.
+function Score({ score, lookedUp }: { score: number | null; lookedUp: boolean }) {
+  if (score === null) {
+    // Looked up before scoring existed: saving the profile scores it.
+    return (
+      <span className="w-16 text-right text-sm leading-tight text-muted">{lookedUp ? "Not scored yet" : "Not looked up"}</span>
+    );
+  }
+  return (
+    <span className="flex w-16 flex-col items-end">
+      <span className="text-3xl font-bold tabular-nums tracking-[-0.03em]">{score}</span>
+      <span className="text-xs text-muted">{score === 1 ? "point" : "points"}</span>
+    </span>
+  );
+}
+
+const chip =
+  "flex min-h-11 items-center rounded-full border px-4 text-base font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+const chipOn = `${chip} border-accent bg-accent text-accent-foreground`;
+const chipOff = `${chip} border-rule bg-field`;
+
+function FilterBar({ filters, hiddenContacted }: { filters: Filters; hiddenContacted: number }) {
+  return (
+    <nav aria-label="Filter companies" className="mt-8 flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium text-muted">Show only</span>
+        <div className="flex flex-wrap gap-2">
+          {FACTOR_CHIPS.map((c) => {
+            const on = filters.factors.includes(c.factor);
+            return (
+              <Link key={c.slug} href={filtersHref(toggleFactor(filters, c.factor))} aria-current={on ? "true" : undefined} className={on ? chipOn : chipOff}>
+                {c.label}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium text-muted">Status</span>
+        <div className="flex flex-wrap gap-2">
+          <Link href={filtersHref({ ...filters, status: null })} aria-current={filters.status === null ? "true" : undefined} className={filters.status === null ? chipOn : chipOff}>
+            Any
+          </Link>
+          {STATUSES.map((s) => {
+            const on = filters.status === s.value;
+            return (
+              <Link key={s.value} href={filtersHref({ ...filters, status: on ? null : s.value })} aria-current={on ? "true" : undefined} className={on ? chipOn : chipOff}>
+                {s.label}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+      {!filters.status && (
+        <Link
+          href={filtersHref({ ...filters, showContacted: !filters.showContacted })}
+          className="-ml-2 flex min-h-12 w-fit items-center px-2 text-base font-medium underline underline-offset-4"
+        >
+          {filters.showContacted
+            ? "Hide companies you’ve contacted"
+            : hiddenContacted > 0
+              ? `Show ${hiddenContacted} ${hiddenContacted === 1 ? "company" : "companies"} you’ve contacted`
+              : "Show companies you’ve contacted"}
+        </Link>
+      )}
+      {isFiltered(filters) && (
+        <Link
+          href={filtersHref({ ...filters, factors: [], status: null })}
+          className="-ml-2 flex min-h-12 w-fit items-center px-2 text-base font-medium underline underline-offset-4"
+        >
+          Clear filters
+        </Link>
+      )}
+    </nav>
   );
 }
 
