@@ -17,7 +17,8 @@ const COOLDOWN_MS = maxDuration * 1000;
 
 export type EnrichResponse =
   // `skipped`: asked to look up only a never-looked-up company, and it had been.
-  | { ok: true; skipped?: boolean; people: number; roles: number; notes: string[] }
+  // `newPeople`: people saved by this lookup that weren't saved before.
+  | { ok: true; skipped?: boolean; people: number; newPeople: number; roles: number; notes: string[] }
   | { ok: false; error: string };
 
 // Last line of defense: no key reaches the page or the database, even if a
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   if (claimError) return fail(500, `Couldn't start the lookup (${claimError.message}).`);
   if (claimed.length === 0) {
     if (onlyNew) {
-      return Response.json({ ok: true, skipped: true, people: 0, roles: 0, notes: [] } satisfies EnrichResponse);
+      return Response.json({ ok: true, skipped: true, people: 0, newPeople: 0, roles: 0, notes: [] } satisfies EnrichResponse);
     }
     return fail(429, "This company was looked up less than a minute ago. Wait a minute, then try again.");
   }
@@ -200,6 +201,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   return Response.json({
     ok: true,
     people: result.people.length,
+    newPeople: fresh.length,
     roles: result.open_roles.length,
     notes: notes.map(safe),
   } satisfies EnrichResponse);

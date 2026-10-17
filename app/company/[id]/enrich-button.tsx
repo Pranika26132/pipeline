@@ -58,10 +58,20 @@ export function EnrichButton({ companyId, domain, looked }: { companyId: string;
     const lines = [`Found ${people} and ${roles}.`];
 
     // Then look for each person's school and hometown on other public pages.
+    // A repeat lookup that found no one new doesn't search again (each run
+    // costs up to 3 searches); "Research founders" is the way to retry.
     setStatus({ kind: "running", step: "research" });
-    const found = await callCompanyApi<ResearchResponse>(`/api/companies/${companyId}/research`);
-    if (found.ok) setStatus({ kind: "done", lines: [...lines, ...researchSummary(found)] });
-    else setStatus({ kind: "error", text: found.error, lines });
+    const found = await callCompanyApi<ResearchResponse>(
+      `/api/companies/${companyId}/research`,
+      lookup.newPeople > 0 ? undefined : { onlyNew: true },
+    );
+    if (!found.ok) setStatus({ kind: "error", text: found.error, lines });
+    else if (found.skipped) {
+      setStatus({
+        kind: "done",
+        lines: [...lines, "No one new, so founder research didn't run again. Tap Research founders to search again."],
+      });
+    } else setStatus({ kind: "done", lines: [...lines, ...researchSummary(found)] });
     startRefresh(() => router.refresh());
   }
 

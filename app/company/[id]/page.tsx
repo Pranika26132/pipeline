@@ -46,7 +46,7 @@ async function Company({ id }: { id: string }) {
   const [companyResult, contactsResult] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons")
+      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons, connection, connection_source_url")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -154,6 +154,12 @@ async function Company({ id }: { id: string }) {
             )}
           </Fact>
           <Fact term="Added from">{describeSource(company.source)}</Fact>
+          {company.connection && (
+            <Fact term="Tagged">
+              {company.connection} <span className="text-muted">(from your list)</span>{" "}
+              <SourceLink url={company.connection_source_url} />
+            </Fact>
+          )}
           <Fact term="Added on">
             <LocalDate iso={company.created_at} />
           </Fact>
