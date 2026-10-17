@@ -215,6 +215,12 @@ Known limits:
 - **End-to-end runs, as the button does** (throwaway users, deleted afterwards):
   - turbo.ai: the lookup found 0 people. Research found "Turbo AI was founded by Sarthak Dhawan" (getlatka.com) and saved him as Founder. Then Duke University from brut.media ("Arora and Dhawan were students at Duke University…"), scoring 3 for a Duke profile. An earlier run found Rudy Arora instead; results vary.
   - restor3d.com: the lookup found 6 leaders on its own site, including the CEO, so no leader search was needed. Research used 3 searches and found no school or hometown stated, so nothing was saved.
+- **Fix: Rudy Arora tagged Duke.** He went to Northwestern; the source was "Arora and Dhawan were students at Duke".
+  - Research now keeps every accepted sentence (`school_evidence`/`hometown_evidence`, with links and a `single` flag), and gives each fact a status: `stated` (scored), `shared` (only a sentence about several people) or `conflicting` (different values; the page shows "Sources disagree" with each source). Only `stated` scores.
+  - A sentence is "about one person" if a part of it (split by "while", "whereas", "but" or ";") names only that person and the value, with no "they/both/respectively" or "X and Y"; or if the value is a description attached to the name ("former Duke University student Sarthak Dhawan").
+  - Facts that are shared or conflicting are researched again on the next run, and new sentences are merged with earlier ones. Search now looks up each person by name.
+  - Migration `20261017223529_person_fact_status.sql` adds the status and evidence columns. It also cleared the one earlier research fact in the user's data (Rudy's Duke at turbo.ai), dropped its points and reset `researched_at`, so research runs again under the new rules.
+  - Turbo AI retest (both founders known), run as the button does. Run 1: Rudy → Northwestern (stated); nothing found for Sarthak. Run 2: Sarthak → Duke University from a sentence about him alone (stated, +3), Rudy → Northwestern (stated), Rudy's Frisco hometown shared (not counted). Full flow from a bare turbo.ai: leader search found Rudy; his only Duke sentence was about both founders, so it was shared and not scored. A seeded conflict renders "Sources disagree" with both sources and "Not counted toward the score."
 - **Next on the queue:** `feature/fit`. About me (graduation year, degree and major, resume pasted or uploaded as a PDF up to 5 MB through Claude's PDF input; text only is stored), and role fit judged by Claude with "unclear" when unsure.
 
 ## Decisions
