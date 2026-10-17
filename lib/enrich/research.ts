@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import { BadModelOutputError, containsWords, mentionsPerson, normalize } from "./extract";
+import { BadModelOutputError, containsWords, normalize } from "./extract";
 
 // Founder research: searches the web for public pages about people a lookup
 // found, and keeps a school or hometown only when a page quoted by the search
@@ -11,8 +11,21 @@ import { BadModelOutputError, containsWords, mentionsPerson, normalize } from ".
 const MODEL = "claude-haiku-5-5";
 // The cap the user chose: at most 3 searches per company.
 export const MAX_SEARCHES = 3;
-// Never searched or cited (CLAUDE.md: no LinkedIn).
-const BLOCKED_DOMAINS = ["linkedin.com", "lnkd.in"];
+// Never searched or cited: LinkedIn (CLAUDE.md) and people-data sites built
+// largely from LinkedIn profiles, whose terms forbid this kind of use.
+const BLOCKED_DOMAINS = [
+  "linkedin.com",
+  "lnkd.in",
+  "rocketreach.co",
+  "zoominfo.com",
+  "apollo.io",
+  "contactout.com",
+  "signalhire.com",
+  "lusha.com",
+  "seamless.ai",
+  "peopledatalabs.com",
+  "theorg.com",
+];
 export const MAX_PEOPLE = 5;
 
 export type ResearchPerson = { key: string; name: string; title: string | null; needSchool: boolean; needHometown: boolean };
@@ -78,13 +91,18 @@ export async function research(
     ],
   });
   if (response.stop_reason === "refusal") throw new BadModelOutputError("The model declined to research these people.");
+  // A cut-off answer would drop citations silently; say so instead.
+  if (response.stop_reason === "max_tokens" || response.stop_reason === "pause_turn") {
+    throw new BadModelOutputError("The research answer was cut off before it finished. Try Research founders again.");
+  }
   const searches = response.usage.server_tool_use?.web_search_requests ?? 0;
 
   // Quotes copied from pages by the search tool, attached to the answer.
   const quotes: Quote[] = [];
   const seen = new Set<string>();
   for (const block of response.content) {
-    if (block.type === "web_search_tool_result" && !Array.isArray(block.content)) {
+    // Reaching the 3-search cap is expected, not a failure.
+    if (block.type === "web_search_tool_result" && !Array.isArray(block.content) && block.content.error_code !== "max_uses_exceeded") {
       notes.push(`A web search failed (${block.content.error_code}).`);
     }
     if (block.type !== "text") continue;
@@ -117,7 +135,7 @@ export function acceptFacts(picked: Picked[], targets: ResearchPerson[], quotes:
     // Colleges only: a high school says nothing about alumni.
     if (f.kind === "school" && /\b(high school|secondary school|middle school)\b/i.test(value)) continue;
     if (f.kind === "school" ? !person.needSchool : !person.needHometown) continue;
-    if (!mentionsPerson(quote.text, person.name) || !containsWords(normalize(quote.text), value)) continue;
+    if (!statesFor(quote.text, person, value, targets)) continue;
     const finding = findings.get(person.key) ?? { key: person.key };
     if (!finding[f.kind]) finding[f.kind] = { value, quote: quote.text, url: quote.url };
     findings.set(person.key, finding);
@@ -160,6 +178,58 @@ async function pick(client: Anthropic, people: ResearchPerson[], quotes: Quote[]
   );
 }
 
+// Name particles that don't identify anyone on their own.
+const PARTICLES = new Set(["de", "da", "di", "del", "della", "la", "le", "van", "von", "der", "den", "bin", "binti", "al", "el", "dos", "das", "du", "st", "jr", "sr", "ii", "iii"]);
+
+// The ways a quote can name a person: full name, last name, or first name
+// (never a particle or a one- or two-letter part).
+function nameForms(name: string): string[] {
+  const parts = name.trim().split(/\s+/).filter((w) => w.length > 2 && !PARTICLES.has(w.toLowerCase()));
+  return [...new Set([name.trim(), parts[parts.length - 1], parts[0]].filter((w): w is string => !!w))];
+}
+
+// Character positions where the quote names this person.
+function namePositions(text: string, name: string): number[] {
+  const out: number[] = [];
+  for (const form of nameForms(name)) {
+    const re = new RegExp(`(^|[^\\p{L}\\p{N}])(${escape(normalize(form))})(?=$|[^\\p{L}\\p{N}])`, "gu");
+    for (const m of text.matchAll(re)) out.push(m.index + m[1].length);
+  }
+  return out;
+}
+
+// True when the quote states `value` for this person: the quote names them
+// and contains the value as whole words. When the quote names several of the
+// people being researched ("Sarthak is at Duke, while Rudy studies at
+// Northwestern"), the value goes to the person named closest before it (or,
+// if no one is named before it, closest after), so one person's school can't
+// be credited to another.
+export function statesFor(quote: string, person: ResearchPerson, value: string, everyone: ResearchPerson[]): boolean {
+  const text = normalize(quote);
+  const mine = namePositions(text, person.name);
+  if (mine.length === 0 || !containsWords(text, value)) return false;
+  const others = everyone.filter((p) => p.key !== person.key && namePositions(text, p.name).length > 0);
+  if (others.length === 0) return true;
+
+  const needle = new RegExp(`(^|[^\\p{L}\\p{N}])${escape(normalize(value).trim())}(?=$|[^\\p{L}\\p{N}])`, "gu");
+  const mentions = [
+    ...mine.map((at) => ({ at, me: true })),
+    ...others.flatMap((p) => namePositions(text, p.name).map((at) => ({ at, me: false }))),
+  ];
+  // Any occurrence of the value whose nearest name is this person counts.
+  for (const m of text.matchAll(needle)) {
+    const at = m.index + m[1].length;
+    const before = mentions.filter((x) => x.at < at).sort((a, b) => b.at - a.at)[0];
+    const nearest = before ?? mentions.filter((x) => x.at > at).sort((a, b) => a.at - b.at)[0];
+    if (nearest?.me) return true;
+  }
+  return false;
+}
+
+function escape(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Names and quotes are data: they can't open or close the quote wrapper.
 function clean(text: string) {
   return text.replace(/<\/?\s*quote/gi, "[quote").replace(/\s+/g, " ").trim();
@@ -169,7 +239,8 @@ function usableUrl(url: string) {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase().replace(/\.+$/, "");
-    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    // The database keeps links up to 2000 characters.
+    if ((u.protocol !== "https:" && u.protocol !== "http:") || url.length > 2000) return false;
     return !BLOCKED_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
   } catch {
     return false;

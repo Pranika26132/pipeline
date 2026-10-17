@@ -36,6 +36,20 @@ describe("acceptFacts", () => {
     ).toEqual([]);
   });
 
+  it("never credits one person's school to another named in the same quote", () => {
+    // Quote 1 names both: Duke is Sarthak's, Northwestern is Rudy's.
+    expect(acceptFacts([{ person: 2, kind: "school", value: "Duke University", quote: 1 }], people, quotes)).toEqual([]);
+    expect(acceptFacts([{ person: 1, kind: "school", value: "Northwestern University", quote: 1 }], people, quotes)).toEqual([]);
+    const right = acceptFacts([{ person: 2, kind: "school", value: "Northwestern University", quote: 1 }], people, quotes);
+    expect(right[0]).toMatchObject({ key: "b", school: { value: "Northwestern University" } });
+  });
+
+  it("doesn't treat a name particle as naming the person", () => {
+    const ana: ResearchPerson[] = [{ key: "c", name: "Ana de Souza", title: null, needSchool: true, needHometown: true }];
+    const q: Quote[] = [{ text: "The lab partnered with Universidade de São Paulo last year.", url: "https://example.com/z" }];
+    expect(acceptFacts([{ person: 1, kind: "school", value: "Universidade de São Paulo", quote: 1 }], ana, q)).toEqual([]);
+  });
+
   it("ignores made-up person or quote numbers", () => {
     expect(acceptFacts([{ person: 9, kind: "school", value: "Duke", quote: 1 }], people, quotes)).toEqual([]);
     expect(acceptFacts([{ person: 1, kind: "school", value: "Duke", quote: 0 }], people, quotes)).toEqual([]);

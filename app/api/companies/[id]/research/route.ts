@@ -112,6 +112,13 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     return fail(502, `Founder research failed. ${describeModelError(e)}`);
   }
 
+  // Rescores after facts change; returns text to add to an error, if any.
+  const refreshScore = async () => {
+    const bumped = await bumpFactsVersion(supabase, id);
+    const scored = bumped.error ? bumped : await rescore(supabase, id);
+    return scored.error ? `The score couldn't be updated. ${scored.error}` : "";
+  };
+
   // Fill only empty fields, so nothing a lookup or the user saved is replaced.
   const found: string[] = [];
   for (const f of result.findings) {
@@ -125,7 +132,10 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
         .eq("id", f.key)
         .is(kind, null)
         .select("id");
-      if (error) return fail(500, `Couldn't save what was found for ${person.name} (${error.message}).`);
+      if (error) {
+        const saved = found.length > 0 ? `Saved: ${found.join("; ")}. ${await refreshScore()}` : "";
+        return fail(500, `Couldn't save what was found for ${person.name} (${error.message}). ${saved}`.trim());
+      }
       if (updated.length > 0) found.push(`${person.name}: ${kind === "school" ? "went to" : "is from"} ${fact.value}`);
     }
   }
@@ -134,10 +144,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   if (found.length === 0) notes.push("No page found by the search stated a school or hometown for these people.");
 
   if (found.length > 0) {
-    const bumped = await bumpFactsVersion(supabase, id);
-    if (bumped.error) return fail(500, `Saved what was found, but the score couldn't be updated. ${bumped.error}`);
-    const scored = await rescore(supabase, id);
-    if (scored.error) return fail(500, `Saved what was found, but the score couldn't be updated. ${scored.error}`);
+    const scoreError = await refreshScore();
+    if (scoreError) return fail(500, `Saved what was found (${found.join("; ")}), but ${scoreError.charAt(0).toLowerCase()}${scoreError.slice(1)}`);
   }
 
   return done({ people: Math.min(people.length, MAX_PEOPLE), found, searches: result.searches, notes });
