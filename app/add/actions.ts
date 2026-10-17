@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 
 import { parseCsv, type CsvRow } from "@/lib/csv";
 import { normalizeCompanyUrl } from "@/lib/domain";
+import { bumpFactsVersion } from "@/lib/facts";
+import { rescore } from "@/lib/rescore";
 import { createClient } from "@/lib/supabase/server";
 
 import { CSV_MAX_BYTES, CSV_MAX_ROWS } from "./limits";
@@ -33,10 +35,14 @@ type Candidate = {
   name: string;
   url: string;
   domain: string;
+  // From the optional CSV columns: a tag like "Duke" and the page it came from.
+  connection?: string;
+  connectionSource?: string;
 };
 
 const LOOKUP_CHUNK = 100;
 const NAME_MAX_LENGTH = 200;
+const CONNECTION_MAX_LENGTH = 200;
 const FILENAME_MAX_LENGTH = 100;
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -113,6 +119,9 @@ export async function addFromCsv(_prev: AddState, formData: FormData): Promise<A
   const header = table[0].cells.map((h) => h.trim().toLowerCase());
   const nameCol = header.indexOf("name");
   const urlCol = header.indexOf("url");
+  // Optional: "connection" (e.g. Duke) and "source_url" (the page the list came from).
+  const connectionCol = header.indexOf("connection");
+  const sourceCol = header.indexOf("source_url");
   if (nameCol === -1 || urlCol === -1) {
     const missing = [nameCol === -1 && "name", urlCol === -1 && "url"].filter(Boolean).join(" and ");
     return {
@@ -152,12 +161,29 @@ export async function addFromCsv(_prev: AddState, formData: FormData): Promise<A
       });
       return;
     }
+    const connection = connectionCol === -1 ? "" : (cells[connectionCol] ?? "").trim().replace(/\s+/g, " ");
+    const rawSource = sourceCol === -1 ? "" : (cells[sourceCol] ?? "").trim();
+    if (connection.length > CONNECTION_MAX_LENGTH) {
+      rejected.push({ label, line, status: "skipped", message: `Connection is over ${CONNECTION_MAX_LENGTH} characters.` });
+      return;
+    }
+    let connectionSource: string | undefined;
+    if (connection && rawSource) {
+      const source = httpUrl(rawSource);
+      if (!source) {
+        rejected.push({ label, line, status: "skipped", message: "source_url isn't a web address starting with https://." });
+        return;
+      }
+      connectionSource = source;
+    }
     candidates.push({
       label,
       line,
       name: rawName || normalized.domain,
       url: normalized.url,
       domain: normalized.domain,
+      connection: connection || undefined,
+      connectionSource,
     });
   });
 
@@ -205,24 +231,63 @@ async function save(
   }
 
   const fresh: Candidate[] = [];
+  const retag: Candidate[] = [];
   for (const c of unique) {
     if (existing.has(c.domain)) {
-      outcomes.push({
-        label: c.label,
-        line: c.line,
-        domain: c.domain,
-        status: "duplicate",
-        message: `${c.domain} is already in your list.`,
-      });
+      if (c.connection) retag.push(c);
+      else
+        outcomes.push({
+          label: c.label,
+          line: c.line,
+          domain: c.domain,
+          status: "duplicate",
+          message: `${c.domain} is already in your list.`,
+        });
     } else {
       fresh.push(c);
     }
   }
 
+  // An already-saved company gets the list's tag if it has none yet; a tag it
+  // already has is left alone.
+  for (const c of retag) {
+    const { data, error } = await supabase
+      .from("companies")
+      .update({ connection: c.connection, connection_source_url: c.connectionSource ?? null })
+      .eq("domain", c.domain)
+      .is("connection", null)
+      .select("id");
+    if (error) return { submittedAt, error: `Couldn't tag ${c.domain} (${error.message}). Nothing else was changed.` };
+    const tagged = data[0]?.id;
+    if (tagged) {
+      const updated = await bumpFactsVersion(supabase, tagged);
+      const scored = updated.error ? updated : await rescore(supabase, tagged);
+      if (scored.error) return { submittedAt, error: `Tagged ${c.domain}, but its score couldn't be updated. ${scored.error}` };
+    }
+    outcomes.push({
+      label: c.label,
+      line: c.line,
+      domain: c.domain,
+      status: "duplicate",
+      message: tagged
+        ? `${c.domain} is already in your list; tagged it ${c.connection}.`
+        : `${c.domain} is already in your list and already has a tag.`,
+    });
+  }
+
   if (fresh.length > 0) {
     const { error } = await supabase
       .from("companies")
-      .insert(fresh.map((c) => ({ name: c.name, url: c.url, domain: c.domain, source })));
+      .insert(
+        fresh.map((c) => ({
+          name: c.name,
+          url: c.url,
+          domain: c.domain,
+          source,
+          connection: c.connection ?? null,
+          connection_source_url: c.connectionSource ?? null,
+        })),
+      );
     if (error) {
       const message =
         error.code === "23505"
@@ -231,11 +296,20 @@ async function save(
       return { submittedAt, error: message };
     }
     fresh.forEach((c) =>
-      outcomes.push({ label: c.label, line: c.line, domain: c.domain, status: "added", message: "Added." }),
+      outcomes.push({ label: c.label, line: c.line, domain: c.domain, status: "added", message: c.connection ? `Added, tagged ${c.connection}.` : "Added." }),
     );
-    revalidatePath("/");
   }
+  if (fresh.length > 0 || retag.length > 0) revalidatePath("/", "layout");
 
   outcomes.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
   return { submittedAt, rows: outcomes };
+}
+
+function httpUrl(raw: string): string | undefined {
+  try {
+    const u = new URL(raw);
+    return (u.protocol === "https:" || u.protocol === "http:") && u.href.length <= 2000 ? u.href : undefined;
+  } catch {
+    return undefined;
+  }
 }

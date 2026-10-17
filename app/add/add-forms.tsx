@@ -96,7 +96,10 @@ export function AddCsvForm() {
         <span className="text-base font-medium">CSV file</span>
         <span className="text-base text-muted">
           First row must name the columns. Needs <code className="font-semibold text-foreground">name</code> and{" "}
-          <code className="font-semibold text-foreground">url</code>; other columns are ignored.
+          <code className="font-semibold text-foreground">url</code>. Optional:{" "}
+          <code className="font-semibold text-foreground">connection</code> (like Duke, for a list of Duke-founded
+          companies) and <code className="font-semibold text-foreground">source_url</code> (the page the list came
+          from); a connection that matches your profile counts toward the score. Other columns are ignored.
         </span>
         <input
           name="file"
@@ -177,7 +180,7 @@ function Ledger({ rows }: { rows: RowOutcome[] }) {
                 {VERDICT[r.status]}
               </span>
             </p>
-            {r.status !== "added" && <p className="mt-1 text-base text-muted">{r.message}</p>}
+            {r.message !== "Added." && <p className="mt-1 text-base text-muted">{r.message}</p>}
           </div>
         </li>
       ))}
