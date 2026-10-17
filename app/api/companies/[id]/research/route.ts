@@ -19,8 +19,9 @@ export type ResearchResponse =
       ok: true;
       // Asked to research only a never-researched company, and it had been.
       skipped?: boolean;
-      // People looked into, facts found, searches used.
+      // People looked into, leaders found by search, facts found, searches used.
       people: number;
+      leaders: { name: string; title: string; url: string }[];
       found: string[];
       searches: number;
       notes: string[];
@@ -35,8 +36,14 @@ function fail(status: number, error: string) {
   return Response.json({ ok: false, error: safe(error) } satisfies ResearchResponse, { status });
 }
 
-function done(body: Omit<Extract<ResearchResponse, { ok: true }>, "ok">) {
-  return Response.json({ ok: true, ...body, found: body.found.map(safe), notes: body.notes.map(safe) } satisfies ResearchResponse);
+function done(body: Omit<Extract<ResearchResponse, { ok: true }>, "ok" | "leaders"> & { leaders?: Extract<ResearchResponse, { ok: true }>["leaders"] }) {
+  return Response.json({
+    ok: true,
+    ...body,
+    leaders: body.leaders ?? [],
+    found: body.found.map(safe),
+    notes: body.notes.map(safe),
+  } satisfies ResearchResponse);
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[id]/research">) {
@@ -87,9 +94,11 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     .filter((c) => !c.school || !c.hometown)
     .sort((a, b) => leaderRank(a.title) - leaderRank(b.title))
     .map((c) => ({ key: c.id, name: c.name, title: c.title, needSchool: !c.school, needHometown: !c.hometown }));
-  if (people.length === 0) {
-    const why = contacts.length === 0 ? "No people are saved for this company yet." : "Everyone saved already has a school and hometown.";
-    return done({ people: 0, found: [], searches: 0, notes: [why] });
+  // The company's own pages named no founder or CEO: search for who founded
+  // or leads it first (within the same 3-search cap).
+  const discover = !contacts.some((c) => c.title && FOUNDER_OR_CEO.test(c.title));
+  if (people.length === 0 && !discover) {
+    return done({ people: 0, found: [], searches: 0, notes: ["Everyone saved already has a school and hometown."] });
   }
 
   // Claims the run in one conditional update, so two taps can't both search.
@@ -107,7 +116,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
 
   let result;
   try {
-    result = await research(apiKey, company, people);
+    result = await research(apiKey, company, people, discover);
   } catch (e) {
     return fail(502, `Founder research failed. ${describeModelError(e)}`);
   }
@@ -119,17 +128,46 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     return scored.error ? `The score couldn't be updated. ${scored.error}` : "";
   };
 
+  // Save the leaders search found, each with the sentence naming them and its
+  // page. A name saved meanwhile (unique per company) is skipped, not an error.
+  const keyToId = new Map(people.map((p) => [p.key, p.key]));
+  const leaders: { name: string; title: string; url: string }[] = [];
+  for (const l of result.leaders) {
+    const { data: inserted, error } = await supabase
+      .from("contacts")
+      .insert({ company_id: id, name: l.name, title: l.title, source_url: l.url, source_quote: l.quote })
+      .select("id")
+      .maybeSingle();
+    if (error?.code === "23505") continue;
+    if (error) return fail(500, `Couldn't save ${l.name}, found as ${l.title} (${error.message}).`);
+    if (inserted) {
+      keyToId.set(l.key, inserted.id);
+      leaders.push({ name: l.name, title: l.title, url: l.url });
+    }
+  }
+  if (leaders.length > 0) {
+    // Someone to write to now.
+    const flagged = await supabase.from("companies").update({ needs_manual_info: false }).eq("id", id);
+    if (flagged.error) return fail(500, `Saved the people found, but couldn't update the company (${flagged.error.message}).`);
+  }
+  const names = new Map([
+    ...contacts.map((c) => [c.id, c.name] as const),
+    ...result.leaders.map((l) => [l.key, l.name] as const),
+  ]);
+
   // Fill only empty fields, so nothing a lookup or the user saved is replaced.
   const found: string[] = [];
   for (const f of result.findings) {
-    const person = contacts.find((c) => c.id === f.key)!;
+    const contactId = keyToId.get(f.key);
+    if (!contactId) continue;
+    const person = { name: names.get(f.key) ?? "" };
     for (const kind of ["school", "hometown"] as const) {
       const fact = f[kind];
       if (!fact) continue;
       const { data: updated, error } = await supabase
         .from("contacts")
         .update({ [kind]: fact.value, [`${kind}_source_url`]: fact.url, [`${kind}_quote`]: fact.quote })
-        .eq("id", f.key)
+        .eq("id", contactId)
         .is(kind, null)
         .select("id");
       if (error) {
@@ -141,15 +179,22 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   }
 
   const notes = [...result.notes];
-  if (found.length === 0) notes.push("No page found by the search stated a school or hometown for these people.");
+  if (discover && leaders.length === 0) {
+    notes.push(`No page found by the search named a founder or CEO of ${company.name}.`);
+  }
+  if (found.length === 0 && (people.length > 0 || leaders.length > 0)) {
+    notes.push("No page found by the search stated a school or hometown for these people.");
+  }
 
-  if (found.length > 0) {
+  if (found.length > 0 || leaders.length > 0) {
     const scoreError = await refreshScore();
     if (scoreError) return fail(500, `Saved what was found (${found.join("; ")}), but ${scoreError.charAt(0).toLowerCase()}${scoreError.slice(1)}`);
   }
 
-  return done({ people: Math.min(people.length, MAX_PEOPLE), found, searches: result.searches, notes });
+  return done({ people: Math.min(people.length, MAX_PEOPLE) + leaders.length, leaders, found, searches: result.searches, notes });
 }
+
+const FOUNDER_OR_CEO = /\b(co-?founder|founder|ceo|chief executive)\b/i;
 
 function leaderRank(title: string | null) {
   if (!title) return 2;
