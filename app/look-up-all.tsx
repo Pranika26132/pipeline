@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import type { EnrichResponse } from "./api/companies/[id]/enrich/route";
+import type { ResearchResponse } from "./api/companies/[id]/research/route";
+import { callCompanyApi } from "./company/[id]/enrich-button";
 
 type Target = { id: string; name: string };
 type Problem = { id: string; name: string; text: string };
@@ -16,6 +18,8 @@ type Run = {
   warnings: Problem[];
   // Looked up meanwhile from somewhere else, so not looked up again.
   skipped: number;
+  // Schools and hometowns founder research found, e.g. "Jane Doe: went to Duke".
+  found: string[];
   stopped: string | null;
   finished: boolean;
 };
@@ -44,7 +48,7 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
     stopRef.current = false;
     // A snapshot: the list refreshes during the run, but these are the targets.
     const targets = pending;
-    let state: Run = { targets, done: 0, current: null, failures: [], warnings: [], skipped: 0, stopped: null, finished: false };
+    let state: Run = { targets, done: 0, current: null, failures: [], warnings: [], skipped: 0, found: [], stopped: null, finished: false };
     const update = (next: Partial<Run>) => {
       state = { ...state, ...next };
       setRun(state);
@@ -56,7 +60,7 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
         update({ stopped: "Stopped. Companies already looked up keep their results." });
         break;
       }
-      update({ current: t.name });
+      update({ current: `Reading ${t.name}…` });
       let body: EnrichResponse | null = null;
       let status = 0;
       try {
@@ -83,6 +87,17 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
         update({ skipped: state.skipped + 1 });
       } else if (body.notes.length > 0) {
         update({ warnings: [...state.warnings, { ...t, text: body.notes.join("\n") }] });
+      }
+
+      // Then founder research for the people just found (up to 3 searches).
+      if (body?.ok && !body.skipped && body.people > 0 && !stopRef.current) {
+        update({ current: `Researching founders at ${t.name}…` });
+        const found = await callCompanyApi<ResearchResponse>(`/api/companies/${t.id}/research`, { onlyNew: true });
+        if (!found.ok) {
+          update({ failures: [...state.failures, { ...t, text: `Founder research: ${found.error}` }] });
+        } else if (found.found.length > 0) {
+          update({ found: [...state.found, ...found.found.map((f) => `${t.name}: ${f}`)] });
+        }
       }
       update({ done: state.done + 1 });
       // Show the new score and reasons as each one finishes.
@@ -119,8 +134,10 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
       {confirming && (
         <div className="flex flex-col gap-3 rounded-lg border-2 border-foreground p-4">
           <p className="text-base">
-            This reads the website of {label} one at a time and asks Claude about each, which uses your API credit. Keep
-            this page open while it runs.
+            This reads the website of {label} one at a time, asks Claude about each, and searches the web (at most 3
+            searches per company) for where the people found went to school and are from. That uses your API credit:
+            roughly 2 to 4 cents a company, up to about ${(pending.length * 0.04).toFixed(2)} in all. Keep this page open
+            while it runs.
           </p>
           <div className="grid grid-cols-2 gap-3">
             <button
@@ -147,7 +164,7 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
             <p className="text-lg font-semibold tabular-nums">
               {run.done} of {total} done
             </p>
-            {run.current && <p className="text-base text-muted wrap-anywhere">Reading {run.current}…</p>}
+            {run.current && <p className="text-base text-muted wrap-anywhere">{run.current}</p>}
             {run.finished && !run.stopped && (
               <p className="text-base text-muted">
                 {run.failures.length === 0
@@ -181,6 +198,20 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
             </p>
           )}
           {run.failures.length > 0 && <ProblemList problems={run.failures} tone="text-danger" />}
+          {run.found.length > 0 && (
+            <details>
+              <summary className="flex min-h-12 cursor-pointer items-center text-base font-medium underline underline-offset-4">
+                Founder research found {run.found.length} {run.found.length === 1 ? "fact" : "facts"}
+              </summary>
+              <ul className="flex flex-col gap-1 pb-2 text-base">
+                {run.found.map((f, i) => (
+                  <li key={i} className="wrap-anywhere">
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {run.warnings.length > 0 && (
             <details>
               <summary className="flex min-h-12 cursor-pointer items-center text-base font-medium underline underline-offset-4">
