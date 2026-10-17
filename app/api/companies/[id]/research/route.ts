@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 
 import { describeModelError } from "@/lib/enrich/errors";
-import { MAX_PEOPLE, research, type ResearchPerson } from "@/lib/enrich/research";
+import { MAX_PEOPLE, research, resolveFact, type Evidence, type ResearchPerson } from "@/lib/enrich/research";
 import { bumpFactsVersion } from "@/lib/facts";
 import { API_KEY_MESSAGE, isWellFormedApiKey, redactSecrets } from "@/lib/redact";
 import { rescore } from "@/lib/rescore";
@@ -84,16 +84,25 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
 
   const { data: contacts, error: contactsError } = await supabase
     .from("contacts")
-    .select("id, name, title, school, hometown")
+    .select("id, name, title, school, hometown, school_status, hometown_status, school_evidence, hometown_evidence, added_by_user")
     .eq("company_id", id)
     .order("name");
   if (contactsError) return fail(500, `Couldn't load the people (${contactsError.message}).`);
 
-  // Only people missing a school or hometown; founders and leaders first.
+  // People missing a school or hometown, or whose earlier research wasn't
+  // settled (only a shared sentence, or sources disagreed); founders first.
+  // Facts the user typed are never researched over.
+  const open = (value: string | null, status: string | null) => !value || status === "shared" || status === "conflicting";
   const people: ResearchPerson[] = contacts
-    .filter((c) => !c.school || !c.hometown)
+    .filter((c) => !c.added_by_user && (open(c.school, c.school_status) || open(c.hometown, c.hometown_status)))
     .sort((a, b) => leaderRank(a.title) - leaderRank(b.title))
-    .map((c) => ({ key: c.id, name: c.name, title: c.title, needSchool: !c.school, needHometown: !c.hometown }));
+    .map((c) => ({
+      key: c.id,
+      name: c.name,
+      title: c.title,
+      needSchool: open(c.school, c.school_status),
+      needHometown: open(c.hometown, c.hometown_status),
+    }));
   // The company's own pages named no founder or CEO: search for who founded
   // or leads it first (within the same 3-search cap).
   const discover = !contacts.some((c) => c.title && FOUNDER_OR_CEO.test(c.title));
@@ -116,7 +125,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
 
   let result;
   try {
-    result = await research(apiKey, company, people, discover);
+    const researched = new Set(people.map((p) => p.key));
+    const otherPeople = contacts.filter((c) => !researched.has(c.id)).map((c) => c.name);
+    result = await research(apiKey, company, people, discover, otherPeople);
   } catch (e) {
     return fail(502, `Founder research failed. ${describeModelError(e)}`);
   }
@@ -155,26 +166,41 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     ...result.leaders.map((l) => [l.key, l.name] as const),
   ]);
 
-  // Fill only empty fields, so nothing a lookup or the user saved is replaced.
+  // Merge new sentences with those from earlier research, then save one
+  // answer per fact with how sure it is. Only empty or unsettled facts are
+  // written, so nothing a lookup or the user saved is replaced.
   const found: string[] = [];
   for (const f of result.findings) {
     const contactId = keyToId.get(f.key);
     if (!contactId) continue;
+    const saved = contacts.find((c) => c.id === contactId);
     const person = { name: names.get(f.key) ?? "" };
     for (const kind of ["school", "hometown"] as const) {
-      const fact = f[kind];
-      if (!fact) continue;
+      if (f[kind].length === 0) continue;
+      const earlier = (Array.isArray(saved?.[`${kind}_evidence`]) ? saved[`${kind}_evidence`] : []) as Evidence[];
+      const evidence = [...earlier];
+      for (const e of f[kind]) {
+        if (!evidence.some((x) => x.url === e.url && x.value.toLowerCase() === e.value.toLowerCase())) evidence.push(e);
+      }
+      const answer = resolveFact(kind, evidence.slice(0, 10));
+      if (!answer) continue;
       const { data: updated, error } = await supabase
         .from("contacts")
-        .update({ [kind]: fact.value, [`${kind}_source_url`]: fact.url, [`${kind}_quote`]: fact.quote })
+        .update({
+          [kind]: answer.value,
+          [`${kind}_status`]: answer.status,
+          [`${kind}_source_url`]: answer.url,
+          [`${kind}_quote`]: answer.quote,
+          [`${kind}_evidence`]: evidence.slice(0, 10),
+        })
         .eq("id", contactId)
-        .is(kind, null)
+        .or(`${kind}.is.null,${kind}_status.in.(shared,conflicting)`)
         .select("id");
       if (error) {
-        const saved = found.length > 0 ? `Saved: ${found.join("; ")}. ${await refreshScore()}` : "";
-        return fail(500, `Couldn't save what was found for ${person.name} (${error.message}). ${saved}`.trim());
+        const done = found.length > 0 ? `Saved: ${found.join("; ")}. ${await refreshScore()}` : "";
+        return fail(500, `Couldn't save what was found for ${person.name} (${error.message}). ${done}`.trim());
       }
-      if (updated.length > 0) found.push(`${person.name}: ${kind === "school" ? "went to" : "is from"} ${fact.value}`);
+      if (updated.length > 0) found.push(describeAnswer(person.name, kind, answer, evidence));
     }
   }
 
@@ -192,6 +218,14 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   }
 
   return done({ people: Math.min(people.length, MAX_PEOPLE) + leaders.length, leaders, found, searches: result.searches, notes });
+}
+
+function describeAnswer(name: string, kind: "school" | "hometown", answer: { value: string; status: string }, evidence: Evidence[]) {
+  const what = kind === "school" ? "went to" : "is from";
+  if (answer.status === "stated") return `${name}: ${what} ${answer.value}`;
+  if (answer.status === "shared") return `${name}: ${answer.value} (only in a sentence about several people, so not counted)`;
+  const values = [...new Set(evidence.map((e) => e.value))].join(" / ");
+  return `${name}: sources disagree on ${kind === "school" ? "school" : "hometown"} (${values}), so not counted`;
 }
 
 const FOUNDER_OR_CEO = /\b(co-?founder|founder|ceo|chief executive)\b/i;

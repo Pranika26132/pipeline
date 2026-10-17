@@ -57,7 +57,9 @@ async function rescoreOnce(supabase: Supabase, companyId?: string): Promise<{ er
   const contacts = await readAll<ScoreInput["contacts"][number] & { company_id: string }>((from, to) => {
     let q = supabase
       .from("contacts")
-      .select("company_id, name, title, school, hometown, source_url, school_source_url, hometown_source_url, added_by_user")
+      .select(
+        "company_id, name, title, school, hometown, source_url, school_source_url, hometown_source_url, added_by_user, school_status, hometown_status",
+      )
       .order("id");
     if (companyId) q = q.eq("company_id", companyId);
     return q.range(from, to);

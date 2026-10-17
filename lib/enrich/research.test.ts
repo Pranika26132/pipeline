@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { acceptFacts, acceptLeaders, mentionsCompany, type Quote, type ResearchPerson } from "./research";
+import { aboutOnly, acceptFacts, acceptLeaders, mentionsCompany, resolveFact, type Quote, type ResearchPerson } from "./research";
 
 const people: ResearchPerson[] = [
   { key: "a", name: "Sarthak Dhawan", title: "Co-founder", needSchool: true, needHometown: true },
@@ -15,9 +15,13 @@ const quotes: Quote[] = [
 
 describe("acceptFacts", () => {
   it("keeps a school the quote states for that person, with the quote and its page", () => {
-    const found = acceptFacts([{ person: "Sarthak Dhawan", kind: "school", value: "Duke University", quote: 1 }], people, quotes);
+    const found = acceptFacts([{ person: "Sarthak Dhawan", kind: "school", value: "Duke University", quote: 4 }], people, quotes);
     expect(found).toEqual([
-      { key: "a", school: { value: "Duke University", quote: quotes[0].text, url: "https://www.starterstory.com/x" } },
+      {
+        key: "a",
+        school: [{ value: "Duke University", quote: quotes[3].text, url: "https://dailynorthwestern.com/y", single: true }],
+        hometown: [],
+      },
     ]);
   });
 
@@ -41,34 +45,82 @@ describe("acceptFacts", () => {
     expect(acceptFacts([{ person: "Rudy Arora", kind: "school", value: "Duke University", quote: 1 }], people, quotes)).toEqual([]);
     expect(acceptFacts([{ person: "Sarthak Dhawan", kind: "school", value: "Northwestern University", quote: 1 }], people, quotes)).toEqual([]);
     const right = acceptFacts([{ person: "Rudy Arora", kind: "school", value: "Northwestern University", quote: 1 }], people, quotes);
-    expect(right[0]).toMatchObject({ key: "b", school: { value: "Northwestern University" } });
+    expect(right[0].school[0]).toMatchObject({ value: "Northwestern University" });
   });
 
-  it("doesn't treat a name particle as naming the person", () => {
-    const ana: ResearchPerson[] = [{ key: "c", name: "Ana de Souza", title: null, needSchool: true, needHometown: true }];
-    const q: Quote[] = [{ text: "The lab partnered with Universidade de São Paulo last year.", url: "https://example.com/z" }];
-    expect(acceptFacts([{ person: "Ana de Souza", kind: "school", value: "Universidade de São Paulo", quote: 1 }], ana, q)).toEqual([]);
+  it("marks a sentence about several people as not single", () => {
+    const q: Quote[] = [
+      { text: "Arora and Dhawan were students at Duke University when they started Turbo AI.", url: "https://brut.example/a" },
+    ];
+    // Only Rudy is being researched; Dhawan is named but not a target.
+    const found = acceptFacts([{ person: "Rudy Arora", kind: "school", value: "Duke University", quote: 1 }], [people[1]], q, [
+      "Sarthak Dhawan",
+    ]);
+    expect(found[0].school[0].single).toBe(false);
+    expect(resolveFact("school", found[0].school)?.status).toBe("shared");
   });
 
-  it("ignores made-up person or quote numbers", () => {
+  it("doesn't call a school with 'and' in its name a sentence about several people", () => {
+    expect(aboutOnly("Jane Doe graduated from the College of William and Mary.", "Jane Doe", "College of William and Mary", [])).toBe(true);
+    expect(aboutOnly("Jane Doe and John Roe both went to Duke.", "Jane Doe", "Duke", [])).toBe(false);
+    expect(aboutOnly("They met at Duke, where Jane Doe studied math.", "Jane Doe", "Duke", [])).toBe(false);
+  });
+
+  it("counts a part of a sentence that's clearly about one person", () => {
+    const q = "Sarthak is currently an undergraduate at Duke University, while Rudy studies at Northwestern University.";
+    expect(aboutOnly(q, "Sarthak Dhawan", "Duke University", ["Rudy Arora"])).toBe(true);
+    expect(aboutOnly(q, "Rudy Arora", "Northwestern University", ["Sarthak Dhawan"])).toBe(true);
+    expect(aboutOnly(q, "Rudy Arora", "Duke University", ["Sarthak Dhawan"])).toBe(false);
+    const described = "The startup, co-founded by Rudy Arora and former Duke University student Sarthak Dhawan, helps students.";
+    expect(aboutOnly(described, "Sarthak Dhawan", "Duke University", ["Rudy Arora"])).toBe(true);
+    expect(aboutOnly(described, "Rudy Arora", "Duke University", ["Sarthak Dhawan"])).toBe(false);
+    expect(aboutOnly("Arora and Dhawan were students at Duke University.", "Sarthak Dhawan", "Duke University", ["Rudy Arora"])).toBe(false);
+  });
+
+  it("ignores made-up people or quote numbers", () => {
     expect(acceptFacts([{ person: "Nobody Here", kind: "school", value: "Duke", quote: 1 }], people, quotes)).toEqual([]);
     expect(acceptFacts([{ person: "Sarthak Dhawan", kind: "school", value: "Duke", quote: 0 }], people, quotes)).toEqual([]);
   });
 
-  it("skips a fact the person already has, and keeps the first of each kind", () => {
+  it("skips a fact the person already has, and keeps every distinct sentence", () => {
     const haveSchool = [{ ...people[0], needSchool: false }, people[1]];
-    expect(acceptFacts([{ person: "Sarthak Dhawan", kind: "school", value: "Duke University", quote: 1 }], haveSchool, quotes)).toEqual([]);
+    expect(acceptFacts([{ person: "Sarthak Dhawan", kind: "school", value: "Duke University", quote: 4 }], haveSchool, quotes)).toEqual([]);
     const found = acceptFacts(
       [
         { person: "Sarthak Dhawan", kind: "school", value: "Duke University", quote: 4 },
-        { person: "Sarthak Dhawan", kind: "school", value: "Duke University", quote: 1 },
+        { person: "Sarthak Dhawan", kind: "school", value: "Duke University", quote: 4 },
         { person: "Sarthak Dhawan", kind: "hometown", value: "Frisco, Texas", quote: 4 },
       ],
       people,
       quotes,
     );
-    expect(found[0].school?.url).toBe("https://dailynorthwestern.com/y");
-    expect(found[0].hometown?.value).toBe("Frisco, Texas");
+    expect(found[0].school).toHaveLength(1);
+    expect(found[0].hometown[0].value).toBe("Frisco, Texas");
+  });
+});
+
+describe("resolveFact", () => {
+  const e = (value: string, single: boolean, url = `https://x.example/${value}`) => ({ value, quote: `q ${value}`, url, single });
+
+  it("is stated when a single-person sentence says it and nothing disagrees", () => {
+    expect(resolveFact("school", [e("Duke University", true), e("Duke", false)])).toMatchObject({
+      value: "Duke University",
+      status: "stated",
+    });
+  });
+
+  it("is shared when only sentences about several people say it", () => {
+    expect(resolveFact("school", [e("Duke University", false)])?.status).toBe("shared");
+  });
+
+  it("is conflicting when sources disagree, even if one is single-person", () => {
+    const answer = resolveFact("school", [e("Duke University", false), e("Northwestern University", true)]);
+    expect(answer).toMatchObject({ status: "conflicting", value: "Northwestern University" });
+  });
+
+  it("treats the same place written two ways as agreeing", () => {
+    expect(resolveFact("hometown", [e("Frisco, Texas", true), e("Frisco, TX", false)])?.status).toBe("stated");
+    expect(resolveFact("hometown", [e("Frisco, Texas", true), e("Austin, Texas", true)])?.status).toBe("conflicting");
   });
 });
 

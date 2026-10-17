@@ -147,6 +147,18 @@ describe("sources for people facts", () => {
     expect(result.reasons[0]).toMatchObject({ factor: "school", source_url: RESEARCH });
   });
 
+  it("scores a researched fact only when it's stated, not shared or conflicting", () => {
+    const withStatus = (school_status: string) =>
+      scoreCompany({
+        profile,
+        company: emptyCompany,
+        contacts: [person({ school: "Duke University", school_source_url: RESEARCH, school_status })],
+      }).score;
+    expect(withStatus("stated")).toBe(3);
+    expect(withStatus("shared")).toBe(0);
+    expect(withStatus("conflicting")).toBe(0);
+  });
+
   it("counts a fact the user added, with no link", () => {
     const result = scoreCompany({
       profile,

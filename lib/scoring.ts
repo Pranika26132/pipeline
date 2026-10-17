@@ -35,6 +35,10 @@ export type ScoreInput = {
     school_source_url?: string | null;
     hometown_source_url?: string | null;
     added_by_user?: boolean;
+    // From founder research: only "stated" counts. "shared" (only a sentence
+    // about several people) and "conflicting" (sources disagree) don't.
+    school_status?: string | null;
+    hometown_status?: string | null;
   }[];
   profile: {
     school: string | null;
@@ -107,6 +111,8 @@ type Contact = ScoreInput["contacts"][number];
 // a person the user added without a link (their own word, still counted).
 // Undefined when the fact has no usable source, so it doesn't count.
 function factSource(c: Contact, fact: "school" | "hometown"): string | null | undefined {
+  const status = fact === "school" ? c.school_status : c.hometown_status;
+  if (status && status !== "stated") return undefined;
   const own = fact === "school" ? c.school_source_url : c.hometown_source_url;
   if (isHttpUrl(own)) return own;
   if (isHttpUrl(c.source_url)) return c.source_url;
