@@ -1,7 +1,7 @@
 // Scores a company as a plain weighted sum (SPEC.md "Filters and scoring").
-// Pure: it reads only facts enrichment saved with a source page, plus the
-// user's profile. Nothing is guessed; a factor without a stated fact on a
-// page simply doesn't count.
+// Pure: it reads only facts saved with a source page (by a lookup or founder
+// research), facts the user typed or imported themselves, and the user's
+// profile. Nothing is guessed; a factor without a stated fact doesn't count.
 
 export type Factor = "school" | "hometown" | "open_role" | "early_stage";
 
@@ -10,7 +10,8 @@ export type Reason = {
   points: number;
   // Plain English, without the source; the page adds "found on <path>".
   text: string;
-  source_url: string;
+  // Null for a fact the user added or imported without a link.
+  source_url: string | null;
 };
 
 export type ScoreInput = {
@@ -19,13 +20,21 @@ export type ScoreInput = {
     size: string | null;
     open_roles: unknown;
     field_sources: unknown;
+    // From an imported list's "connection" column, e.g. "Duke".
+    connection?: string | null;
+    connection_source_url?: string | null;
   };
   contacts: {
     name: string;
     title: string | null;
     school: string | null;
     hometown: string | null;
+    // The page the person was found on (a team page).
     source_url: string | null;
+    // Founder research finds a school or hometown on another page.
+    school_source_url?: string | null;
+    hometown_source_url?: string | null;
+    added_by_user?: boolean;
   }[];
   profile: {
     school: string | null;
@@ -54,16 +63,33 @@ export function scoreCompany({ company, contacts, profile }: ScoreInput): ScoreR
     if (found && weight > 0) reasons.push({ factor, points: weight, ...found });
   };
 
-  const sourced = contacts.filter((c) => isHttpUrl(c.source_url));
+  // The tag from an imported list counts like a person's fact.
+  const connection = company.connection?.trim() || null;
+  const connectionReason = () => ({
+    text: `Tagged ${connection} in your imported list`,
+    source_url: isHttpUrl(company.connection_source_url) ? company.connection_source_url : null,
+  });
 
   if (profile.school?.trim()) {
-    const matches = sourced.filter((c) => c.school && schoolsMatch(profile.school!, c.school));
-    add("school", profile.weight_school, matches.length ? personReason(matches, (c) => `went to ${c.school}`) : null);
+    const matches = contacts.filter((c) => c.school && schoolsMatch(profile.school!, c.school) && factSource(c, "school") !== undefined);
+    const found = matches.length
+      ? personReason(matches, "school", (c) => `went to ${c.school}`)
+      : connection && schoolsMatch(profile.school, connection)
+        ? connectionReason()
+        : null;
+    add("school", profile.weight_school, found);
   }
 
   if (profile.hometown?.trim()) {
-    const matches = sourced.filter((c) => c.hometown && placesMatch(profile.hometown!, c.hometown));
-    add("hometown", profile.weight_hometown, matches.length ? personReason(matches, (c) => `is from ${c.hometown}`) : null);
+    const matches = contacts.filter(
+      (c) => c.hometown && placesMatch(profile.hometown!, c.hometown) && factSource(c, "hometown") !== undefined,
+    );
+    const found = matches.length
+      ? personReason(matches, "hometown", (c) => `is from ${c.hometown}`)
+      : connection && placesMatch(profile.hometown, connection)
+        ? connectionReason()
+        : null;
+    add("hometown", profile.weight_hometown, found);
   }
 
   add("open_role", profile.weight_open_role, roleReason(company.open_roles, profile.role_targets));
@@ -74,14 +100,27 @@ export function scoreCompany({ company, contacts, profile }: ScoreInput): ScoreR
   return { score: reasons.reduce((sum, r) => sum + r.points, 0), reasons };
 }
 
+type Contact = ScoreInput["contacts"][number];
+
+// The page a person's school or hometown came from: its own source when
+// founder research found it, else the page the person was found on. Null for
+// a person the user added without a link (their own word, still counted).
+// Undefined when the fact has no usable source, so it doesn't count.
+function factSource(c: Contact, fact: "school" | "hometown"): string | null | undefined {
+  const own = fact === "school" ? c.school_source_url : c.hometown_source_url;
+  if (isHttpUrl(own)) return own;
+  if (isHttpUrl(c.source_url)) return c.source_url;
+  return c.added_by_user ? null : undefined;
+}
+
 // "Jane Doe (CEO) went to Duke", or "Jane Doe (CEO) and 2 others went to Duke".
 // The source is the first person's page.
-function personReason<C extends ScoreInput["contacts"][number]>(matches: C[], what: (c: C) => string) {
+function personReason(matches: Contact[], fact: "school" | "hometown", what: (c: Contact) => string) {
   const first = matches[0];
   const who = first.title ? `${first.name} (${first.title})` : first.name;
   const others = matches.length - 1;
   const more = others === 0 ? "" : others === 1 ? ` and 1 other` : ` and ${others} others`;
-  return { text: `${who}${more} ${what(first)}`, source_url: first.source_url! };
+  return { text: `${who}${more} ${what(first)}`, source_url: factSource(first, fact) ?? null };
 }
 
 // Schools -----------------------------------------------------------------------
