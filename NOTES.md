@@ -177,6 +177,38 @@ Known limits:
   - "Look up all" runs only while the page is open.
 - SPEC.md: Discover is now Saturday morning, before drafts. All matches start ticked, "Add all" adds the ticked ones, and added companies go into the same lookup queue.
 
+## Finished (branch `feature/people`, 2026-10-17)
+- **Founder research** (`lib/enrich/research.ts`, `POST /api/companies/[id]/research`):
+  - Uses Haiku 5.5 with `web_search_20250305`, `max_uses: 3`. Blocked domains: LinkedIn plus people-data sites built from LinkedIn (rocketreach, zoominfo, apollo, contactout, signalhire, lusha, seamless.ai, peopledatalabs, theorg). Up to 5 people, founders first.
+  - The API's citation quotes (`cited_text` + url) are the evidence. A second structured-output Haiku call maps quotes to people.
+  - `acceptFacts` keeps a fact only if the quote names the person (full name, last name or first name; never a particle) and contains the value as whole words. If the quote names several of the people, the value goes to the person named closest before it. Colleges only, no high schools. Only empty fields are filled.
+  - The quote and its page are saved per fact (`school_source_url`/`school_quote`, `hometown_*`).
+  - Runs after a lookup, during "Look up all" (`onlyNew`), and from "Research founders" on the company page. "Look up again" only re-runs it when the lookup found someone new, so repeat lookups don't repeat the searches.
+  - It's a separate route from the lookup so each stays under 60 s. The cooldown is 60 s on `companies.researched_at`.
+- Measured cost on TurboAI: 2 searches, about 28k input and 2.3k output tokens, about $0.024 a company (max about $0.036). "Look up all" shows an estimate before it starts.
+- TurboAI test: Sarthak Dhawan → Duke University, with a quote that names him. Rudy Arora → Northwestern University, and once Frisco, Texas. Each was saved with its quote and page and scored for a Duke profile.
+- **Add a person** (company page): name, title, school, hometown, source link (http/https only), and an email only if the user typed it (shape-checked). Saved with `added_by_user`; it counts toward the score with "from what you added" when there's no link.
+- **CSV import:** optional `connection` and `source_url` columns. New companies get the tag. Already-saved untagged ones are tagged in batches with one rescore. A bad `source_url` skips the row. The tag shows under About on the company page and scores like a person's fact once the company is looked up.
+- **Scoring:** a school or hometown uses its own source when research found it. User-added facts count with no link. A list connection counts when no person matches.
+- Migration `20261017173628_people_sources.sql` adds the per-fact source and quote columns, `added_by_user` and length checks on contacts, plus `connection`, `connection_source_url` and `researched_at` on companies. No new policies: the existing per-user contacts and companies policies cover the new columns.
+- 114 tests pass, including the research checks: wrong person, particles, high school, made-up numbers.
+- Tested by script with throwaway users (deleted afterwards): research route, add person (including duplicate and bad link), and CSV tags (new, re-tag, keep an existing tag, bad link). The company page shows the quotes and source sites.
+- Fresh-context review: no RLS issue, key leak, unsafe link or LinkedIn leak. Fixed:
+  - a quote naming two founders could give one's school to the other, and name particles counted as names;
+  - "Look up again" re-charged research;
+  - CSV re-tag ran about 8 queries per row and its error wording was wrong;
+  - a cut-off research answer looked like "nothing found";
+  - the 3-search cap showed as an error;
+  - long citation URLs failed the save after the searches were paid for;
+  - CSV tags weren't visible.
+- I also blocked rocketreach.co and similar people-data sites after a test run cited one.
+- Known:
+  - The check is textual, so "worked at Duke Energy" could read as Duke. The saved quote on the page lets the user check.
+  - A joint statement ("Sarthak and Rudy are from Frisco") only credits the person named last.
+  - A "…respectively" sentence can pass if it names the person.
+  - Re-tagging from a CSV doesn't bump `facts_version` (a tiny race with a concurrent profile save; the next rescore fixes it).
+- **Next on the queue:** `feature/fit`. About me (graduation year, degree and major, resume pasted or uploaded as a PDF up to 5 MB through Claude's PDF input; text only is stored), and role fit judged by Claude with "unclear" when unsure.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
