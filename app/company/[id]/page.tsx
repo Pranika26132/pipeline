@@ -52,7 +52,7 @@ async function Company({ id }: { id: string }) {
     supabase
       .from("contacts")
       .select(
-        "id, name, title, school, hometown, source_url, email, school_source_url, school_quote, hometown_source_url, hometown_quote, added_by_user",
+        "id, name, title, school, hometown, source_url, source_quote, email, school_source_url, school_quote, hometown_source_url, hometown_quote, added_by_user",
       )
       .eq("company_id", id)
       .order("name"),
@@ -207,6 +207,16 @@ async function Company({ id }: { id: string }) {
                     <p className="text-lg font-semibold wrap-anywhere">{p.name}</p>
                     {p.title && <p className="text-base">{p.title}</p>}
                   </div>
+                  {p.source_quote && (
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm text-muted">
+                        Named as {p.title?.toLowerCase() ?? "a leader"} <FoundOn url={p.source_url} domain={company.domain} />
+                      </p>
+                      <blockquote className="border-l-2 border-rule pl-3 text-sm leading-relaxed text-muted wrap-anywhere">
+                        “{p.source_quote.trim()}”
+                      </blockquote>
+                    </div>
+                  )}
                   <PersonFact label="School" value={p.school} url={p.school_source_url ?? p.source_url} quote={p.school_quote} byUser={p.added_by_user} domain={company.domain} />
                   <PersonFact label="From" value={p.hometown} url={p.hometown_source_url ?? p.source_url} quote={p.hometown_quote} byUser={p.added_by_user} domain={company.domain} />
                   {p.email && <p className="text-base wrap-anywhere">{p.email}</p>}

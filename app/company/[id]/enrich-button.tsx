@@ -33,9 +33,19 @@ export async function callCompanyApi<T extends { ok: boolean }>(
 }
 
 export function researchSummary(r: Extract<ResearchResponse, { ok: true }>): string[] {
-  if (r.people === 0) return r.notes;
-  const searched = `Searched the web ${r.searches} ${r.searches === 1 ? "time" : "times"} for ${r.people} ${r.people === 1 ? "person" : "people"}.`;
-  return r.found.length > 0 ? [searched, ...r.found.map((f) => `Found: ${f}`)] : [searched, ...r.notes];
+  if (r.searches === 0 && r.people === 0) return r.notes;
+  const searched = `Searched the web ${r.searches} ${r.searches === 1 ? "time" : "times"}.`;
+  const leaders = r.leaders.map((l) => `Found ${l.title.toLowerCase()}: ${l.name} (on ${hostOf(l.url)})`);
+  const found = r.found.map((f) => `Found: ${f}`);
+  return [searched, ...leaders, ...found, ...r.notes];
+}
+
+function hostOf(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "a web page";
+  }
 }
 
 export function EnrichButton({ companyId, domain, looked }: { companyId: string; domain: string; looked: boolean }) {

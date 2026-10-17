@@ -90,13 +90,16 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
       }
 
       // Then founder research for the people just found (up to 3 searches).
-      if (body?.ok && !body.skipped && body.people > 0 && !stopRef.current) {
+      // Runs even when the site named no one: research then searches for the
+      // founders first.
+      if (body?.ok && !body.skipped && !stopRef.current) {
         update({ current: `Researching founders at ${t.name}…` });
         const found = await callCompanyApi<ResearchResponse>(`/api/companies/${t.id}/research`, { onlyNew: true });
         if (!found.ok) {
           update({ failures: [...state.failures, { ...t, text: `Founder research: ${found.error}` }] });
-        } else if (found.found.length > 0) {
-          update({ found: [...state.found, ...found.found.map((f) => `${t.name}: ${f}`)] });
+        } else if (found.found.length > 0 || found.leaders.length > 0) {
+          const leaders = found.leaders.map((l) => `${t.name}: ${l.name} is ${l.title.toLowerCase()}`);
+          update({ found: [...state.found, ...leaders, ...found.found.map((f) => `${t.name}: ${f}`)] });
         }
       }
       update({ done: state.done + 1 });
