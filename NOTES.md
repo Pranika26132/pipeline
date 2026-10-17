@@ -207,6 +207,14 @@ Known limits:
   - A joint statement ("Sarthak and Rudy are from Frisco") only credits the person named last.
   - A "…respectively" sentence can pass if it names the person.
   - Re-tagging from a CSV doesn't bump `facts_version` (a tiny race with a concurrent profile save; the next rescore fixes it).
+- **Leaders found by search** (after "Turbo AI test failed: the site names no one"):
+  - When no saved person is a founder or CEO, research first searches for who founded or leads the company, within the same 3 searches.
+  - `acceptLeaders` keeps a person only if the quote names them in full and calls them founder, co-founder or CEO. "Founded" counts only as "founded by …<name>" or "<name> … founded", not if "hired"/"joined"/"later" comes in between. The quote, the page title or the URL must name this company (its name, website, website label, or the name run together).
+  - Saved with `title`, `source_url` and `source_quote` (migration `20261017221923_contact_source_quote.sql`, no new policies), then researched for school and hometown like everyone else. "Needs info" clears.
+  - "Look up all" now researches companies whose site named no one.
+- **End-to-end runs, as the button does** (throwaway users, deleted afterwards):
+  - turbo.ai: the lookup found 0 people. Research found "Turbo AI was founded by Sarthak Dhawan" (getlatka.com) and saved him as Founder. Then Duke University from brut.media ("Arora and Dhawan were students at Duke University…"), scoring 3 for a Duke profile. An earlier run found Rudy Arora instead; results vary.
+  - restor3d.com: the lookup found 6 leaders on its own site, including the CEO, so no leader search was needed. Research used 3 searches and found no school or hometown stated, so nothing was saved.
 - **Next on the queue:** `feature/fit`. About me (graduation year, degree and major, resume pasted or uploaded as a PDF up to 5 MB through Claude's PDF input; text only is stored), and role fit judged by Claude with "unclear" when unsure.
 
 ## Decisions
