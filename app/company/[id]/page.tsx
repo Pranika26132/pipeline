@@ -52,7 +52,7 @@ async function Company({ id }: { id: string }) {
     supabase
       .from("contacts")
       .select(
-        "id, name, title, school, hometown, source_url, source_quote, email, school_source_url, school_quote, hometown_source_url, hometown_quote, added_by_user",
+        "id, name, title, school, hometown, source_url, source_quote, email, school_source_url, school_quote, hometown_source_url, hometown_quote, added_by_user, school_status, hometown_status, school_evidence, hometown_evidence",
       )
       .eq("company_id", id)
       .order("name"),
@@ -217,8 +217,8 @@ async function Company({ id }: { id: string }) {
                       </blockquote>
                     </div>
                   )}
-                  <PersonFact label="School" value={p.school} url={p.school_source_url ?? p.source_url} quote={p.school_quote} byUser={p.added_by_user} domain={company.domain} />
-                  <PersonFact label="From" value={p.hometown} url={p.hometown_source_url ?? p.source_url} quote={p.hometown_quote} byUser={p.added_by_user} domain={company.domain} />
+                  <PersonFact label="School" value={p.school} url={p.school_source_url ?? p.source_url} quote={p.school_quote} byUser={p.added_by_user} domain={company.domain} status={p.school_status} evidence={p.school_evidence} />
+                  <PersonFact label="From" value={p.hometown} url={p.hometown_source_url ?? p.source_url} quote={p.hometown_quote} byUser={p.added_by_user} domain={company.domain} status={p.hometown_status} evidence={p.hometown_evidence} />
                   {p.email && <p className="text-base wrap-anywhere">{p.email}</p>}
                   {p.added_by_user ? (
                     <p className="text-sm text-muted">Added by you{source ? "" : ", without a link"}.</p>
@@ -282,6 +282,8 @@ function PersonFact({
   quote,
   byUser,
   domain,
+  status,
+  evidence,
 }: {
   label: string;
   value: string | null;
@@ -289,20 +291,53 @@ function PersonFact({
   quote: string | null;
   byUser: boolean;
   domain: string;
+  status: string | null;
+  evidence: unknown;
 }) {
   if (!value) return null;
+  const sources = (Array.isArray(evidence) ? evidence : []) as { value: string; quote: string; url: string; single: boolean }[];
+
+  // Sources disagree: show every value with where it came from; not scored.
+  if (status === "conflicting") {
+    return (
+      <div className="flex flex-col gap-2 rounded-md border border-danger px-3 py-2">
+        <p className="text-base">
+          <span className="text-muted">{label}:</span> <span className="font-semibold text-danger">Sources disagree</span>
+          <span className="block text-sm text-muted">Not counted toward the score.</span>
+        </p>
+        <ul className="flex flex-col gap-2">
+          {sources.map((e, i) => (
+            <li key={i} className="flex flex-col gap-1">
+              <p className="text-base">
+                <span className="font-medium">{e.value}</span> <FoundOn url={e.url} domain={domain} />
+              </p>
+              <Quote text={e.quote} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-1">
       <p className="text-base">
         <span className="text-muted">{label}:</span> <span className="font-medium">{value}</span>{" "}
         {byUser && !safeHref(url) ? null : <FoundOn url={url} domain={domain} />}
       </p>
-      {quote && (
-        <blockquote className="border-l-2 border-rule pl-3 text-sm leading-relaxed text-muted wrap-anywhere">
-          “{quote.trim()}”
-        </blockquote>
+      {status === "shared" && (
+        <p className="text-sm text-muted">Not counted: only a sentence about several people says this.</p>
       )}
+      {quote && <Quote text={quote} />}
     </div>
+  );
+}
+
+function Quote({ text }: { text: string }) {
+  return (
+    <blockquote className="border-l-2 border-rule pl-3 text-sm leading-relaxed text-muted wrap-anywhere">
+      “{text.trim()}”
+    </blockquote>
   );
 }
 
