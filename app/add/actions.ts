@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 
 import { parseCsv, type CsvRow } from "@/lib/csv";
 import { normalizeCompanyUrl } from "@/lib/domain";
-import { bumpFactsVersion } from "@/lib/facts";
 import { rescore } from "@/lib/rescore";
 import { createClient } from "@/lib/supabase/server";
 
@@ -249,21 +248,31 @@ async function save(
   }
 
   // An already-saved company gets the list's tag if it has none yet; a tag it
-  // already has is left alone.
+  // already has is left alone. One update per tag, source and chunk.
+  const groups = new Map<string, Candidate[]>();
   for (const c of retag) {
-    const { data, error } = await supabase
-      .from("companies")
-      .update({ connection: c.connection, connection_source_url: c.connectionSource ?? null })
-      .eq("domain", c.domain)
-      .is("connection", null)
-      .select("id");
-    if (error) return { submittedAt, error: `Couldn't tag ${c.domain} (${error.message}). Nothing else was changed.` };
-    const tagged = data[0]?.id;
-    if (tagged) {
-      const updated = await bumpFactsVersion(supabase, tagged);
-      const scored = updated.error ? updated : await rescore(supabase, tagged);
-      if (scored.error) return { submittedAt, error: `Tagged ${c.domain}, but its score couldn't be updated. ${scored.error}` };
+    const key = JSON.stringify([c.connection, c.connectionSource ?? null]);
+    groups.set(key, [...(groups.get(key) ?? []), c]);
+  }
+  const taggedDomains = new Set<string>();
+  for (const group of groups.values()) {
+    for (let i = 0; i < group.length; i += LOOKUP_CHUNK) {
+      const chunk = group.slice(i, i + LOOKUP_CHUNK);
+      const { data, error } = await supabase
+        .from("companies")
+        .update({ connection: chunk[0].connection, connection_source_url: chunk[0].connectionSource ?? null })
+        .in("domain", chunk.map((c) => c.domain))
+        .is("connection", null)
+        .select("domain");
+      if (error) {
+        const done = taggedDomains.size > 0 ? ` ${taggedDomains.size} saved companies were already tagged.` : "";
+        return { submittedAt, error: `Couldn't tag saved companies (${error.message}). Nothing new was added.${done}` };
+      }
+      data.forEach((row) => taggedDomains.add(row.domain));
     }
+  }
+  for (const c of retag) {
+    const tagged = taggedDomains.has(c.domain);
     outcomes.push({
       label: c.label,
       line: c.line,
@@ -293,13 +302,23 @@ async function save(
         error.code === "23505"
           ? "One of these sites was added from another tab at the same time. Nothing was added; try again."
           : `Couldn't save (${error.message}). Nothing was added.`;
-      return { submittedAt, error: message };
+      const done = taggedDomains.size > 0 ? ` ${taggedDomains.size} saved companies were tagged before this.` : "";
+      return { submittedAt, error: message + done };
     }
     fresh.forEach((c) =>
       outcomes.push({ label: c.label, line: c.line, domain: c.domain, status: "added", message: c.connection ? `Added, tagged ${c.connection}.` : "Added." }),
     );
   }
   if (fresh.length > 0 || retag.length > 0) revalidatePath("/", "layout");
+
+  // A new tag can change a looked-up company's score. One rescore covers all.
+  if (taggedDomains.size > 0) {
+    const scored = await rescore(supabase);
+    if (scored.error) {
+      outcomes.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+      return { submittedAt, rows: outcomes, error: `Imported, but scores couldn't be updated. ${scored.error}` };
+    }
+  }
 
   outcomes.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
   return { submittedAt, rows: outcomes };
