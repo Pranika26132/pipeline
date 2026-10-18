@@ -95,3 +95,21 @@ export function looksLikeDomain(name: string, domain: string): boolean {
   const n = name.trim().toLowerCase().replace(/^www\./, "");
   return n === domain || n === domain.split(".")[0] || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(n);
 }
+
+// A readable name from a website when the pages don't state one: drop the
+// ending and capitalize ("oxide.computer" → "Oxide", "acme-labs.com" →
+// "Acme Labs"). A ".ai" ending is part of how such names are said
+// ("turbo.ai" → "Turbo AI").
+export function nameFromDomain(domain: string): string {
+  const parts = domain.toLowerCase().replace(/^www\./, "").split(".");
+  const tld = parts.length > 1 ? parts.pop()! : "";
+  const words = parts[parts.length - 1].split(/[-_]+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  if (tld === "ai") words.push("AI");
+  return words.join(" ") || domain;
+}
+
+// The name to show and to write drafts with: the saved name, or a readable
+// one from the website when the saved name is just the website.
+export function displayName(name: string, domain: string): string {
+  return looksLikeDomain(name, domain) ? nameFromDomain(domain) : name;
+}

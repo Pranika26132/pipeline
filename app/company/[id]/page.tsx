@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 
-import { looksLikeDomain } from "@/lib/domain";
+import { displayName } from "@/lib/domain";
 import { availableHooks, draftFacts, MAX_WORDS } from "@/lib/drafts";
 import { redactSecrets } from "@/lib/redact";
 import type { Reason } from "@/lib/scoring";
@@ -88,8 +88,7 @@ async function Company({ id }: { id: string }) {
 
   return (
     <article className="mt-6 flex flex-col">
-      <h1 className="text-4xl font-bold tracking-[-0.04em] wrap-anywhere">{company.name}</h1>
-      {looksLikeDomain(company.name, company.domain) && <RenameForm companyId={company.id} current={company.name} />}
+      <h1 className="text-4xl font-bold tracking-[-0.04em] wrap-anywhere">{displayName(company.name, company.domain)}</h1>
       {href ? (
         <a
           href={href}
@@ -102,6 +101,7 @@ async function Company({ id }: { id: string }) {
       ) : (
         <p className="mt-2 text-lg text-muted">{company.domain}</p>
       )}
+      <RenameForm companyId={company.id} current={displayName(company.name, company.domain)} />
 
       {company.needs_manual_info && (
         <p className="mt-4 rounded-md border border-danger px-4 py-3 text-base">

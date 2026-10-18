@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { NextRequest } from "next/server";
 
-import { looksLikeDomain } from "@/lib/domain";
+import { displayName } from "@/lib/domain";
 import { draftFacts, HOOKS, type Hook } from "@/lib/drafts";
 import { writeDraft } from "@/lib/draft-writer";
 import { describeModelError } from "@/lib/enrich/errors";
@@ -77,11 +77,11 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   if (profileResult.error) return fail(500, `Couldn't load your profile (${profileResult.error.message}).`);
 
   const company = companyResult.data;
-  const signature = profileResult.data?.full_name?.trim();
-  if (!signature) return fail(422, "Add your name in your profile first. Drafts are signed with it.");
-  if (looksLikeDomain(company.name, company.domain)) {
-    return fail(422, `Set the company's name first (it's saved as ${company.domain}). Drafts use the name.`);
-  }
+  // Signed with the profile name when there is one; otherwise "Best," alone.
+  const signature = profileResult.data?.full_name?.trim() || null;
+  // The name the pages state, else a readable one from the website
+  // ("oxide.computer" → "Oxide"). Drafts never wait on the name.
+  company.name = displayName(company.name, company.domain);
   const contact = contactResult.data;
   const profile = profileResult.data;
   // The same rule as scoring: a school or hometown is used only when it's
