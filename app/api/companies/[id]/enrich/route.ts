@@ -6,7 +6,9 @@ import { collectPages } from "@/lib/enrich/pages";
 import { looksLikeDomain } from "@/lib/domain";
 import { describeFetchError } from "@/lib/enrich/safe-fetch";
 import { API_KEY_MESSAGE, isWellFormedApiKey, redactSecrets } from "@/lib/redact";
+import { canCheckFit } from "@/lib/fit";
 import { rescore } from "@/lib/rescore";
+import { judgeRoles, loadFitProfile } from "@/lib/role-fit-run";
 import { createClient } from "@/lib/supabase/server";
 
 // Page fetches (8s each, mostly in parallel) plus one model call.
@@ -33,6 +35,7 @@ function fail(status: number, error: string) {
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[id]/enrich">) {
+  const started = Date.now();
   // Only our own pages may trigger this: each run costs money and fetches the web.
   const origin = req.headers.get("origin");
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
@@ -152,6 +155,23 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     if (result[key]) fieldSources[key] = result[key].source_url;
   }
   const oldRoles = Array.isArray(company.open_roles) ? company.open_roles : [];
+  const roles = result.open_roles.length > 0 ? result.open_roles : oldRoles;
+
+  // Role fit is checked in the same run when there's time left; otherwise
+  // the company page offers "Check fit". A failure is a note, not an error:
+  // the lookup itself worked.
+  let roleFit = {};
+  const fitProfile = await loadFitProfile(supabase);
+  if ("error" in fitProfile) notes.push(`Role fit wasn't checked. ${fitProfile.error}`);
+  else if (roles.length > 0 && canCheckFit(fitProfile.profile)) {
+    const left = maxDuration * 1000 - 8_000 - (Date.now() - started);
+    if (left < 8_000) notes.push("Role fit wasn't checked: the lookup used up its time. Use Check fit under Open roles.");
+    else {
+      const judged = await judgeRoles(apiKey, roles, fitProfile.profile, Math.min(20_000, left));
+      if ("error" in judged) notes.push(`${judged.error} Use Check fit under Open roles.`);
+      else roleFit = { role_fit: judged.record };
+    }
+  }
 
   // People first, then the company facts with a new facts_version: a score
   // computed from the old facts (say, by a profile save running now) is then
@@ -185,7 +205,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       stage: result.stage?.value ?? company.stage,
       size: result.size?.value ?? company.size,
       field_sources: fieldSources,
-      open_roles: result.open_roles.length > 0 ? result.open_roles : oldRoles,
+      open_roles: roles,
+      ...roleFit,
       // Flagged while the company has nobody to write to.
       needs_manual_info: existing.length + fresh.length === 0,
       enrich_error: notes.length ? safe(notes.join("\n")) : null,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { placesMatch, roleMatches, schoolsMatch, scoreCompany, type ScoreInput } from "./scoring";
+import { fitKey } from "./fit";
 
 const TEAM = "https://acme.test/team";
 const CAREERS = "https://acme.test/careers";
@@ -38,7 +39,7 @@ describe("scoreCompany", () => {
     expect(result.reasons).toEqual([
       { factor: "school", points: 3, text: "Jane Doe (CEO) went to Duke University", source_url: TEAM },
       { factor: "hometown", points: 2, text: "Jane Doe (CEO) is from Raleigh, North Carolina", source_url: TEAM },
-      { factor: "open_role", points: 2, text: "Hiring: Software Engineering Intern", source_url: CAREERS },
+      { factor: "open_role", points: 2, text: "Hiring: Software Engineering Intern (fit not checked yet)", source_url: CAREERS },
       { factor: "early_stage", points: 1, text: "Small team: 11-50 employees", source_url: ABOUT },
     ]);
   });
@@ -77,7 +78,7 @@ describe("scoreCompany", () => {
     expect(result.reasons[0].text).toBe("Jane Doe (CEO) and 2 others went to Duke");
   });
 
-  it("names an internship first among matching roles", () => {
+  it("names an internship first among matching roles, never a senior or past-dated one", () => {
     const result = scoreCompany({
       profile,
       company: {
@@ -85,12 +86,15 @@ describe("scoreCompany", () => {
         open_roles: [
           { title: "Senior Software Engineer", location: null, source_url: CAREERS },
           { title: "Account Executive", location: null, source_url: CAREERS },
+          { title: "Software Engineering Intern, Summer 2026", location: null, source_url: CAREERS },
           { title: "Software Engineering Intern", location: null, source_url: CAREERS },
+          { title: "Backend Engineer", location: null, source_url: CAREERS },
         ],
       },
       contacts: [],
+      today: new Date("2026-10-18T12:00:00Z"),
     });
-    expect(result.reasons[0].text).toBe("Hiring: Software Engineering Intern and 1 more matching role");
+    expect(result.reasons[0].text).toBe("Hiring: Software Engineering Intern and 1 more matching role (fit not checked yet)");
   });
 
   it("skips roles and facts without a usable source link", () => {
@@ -293,5 +297,66 @@ describe("roleMatches", () => {
     ["Quant trading", "Trading Operations Associate"],
   ])("%s does not match %s", (target, title) => {
     expect(roleMatches(target, title)).toBe(false);
+  });
+});
+
+describe("role fit in scoring", () => {
+  const roles = [
+    { title: "Software Engineer", location: null, source_url: CAREERS },
+    { title: "Software Engineering Intern", location: null, source_url: CAREERS },
+  ];
+  const fitRecord = (key: string, verdicts: [string, string][]) => ({
+    key,
+    checked_at: "2026-10-18T00:00:00Z",
+    roles: roles.map((r, i) => ({ ...r, verdict: verdicts[i][0], reason: verdicts[i][1] })),
+  });
+
+  it("counts only roles Claude says fit, with its reason", () => {
+    const key = fitKey(profile);
+    const result = scoreCompany({
+      profile,
+      company: {
+        ...emptyCompany,
+        open_roles: roles,
+        role_fit: fitRecord(key, [
+          ["unclear", "Level isn't stated."],
+          ["fits", "Software engineering internship; fits your target roles."],
+        ]),
+      },
+      contacts: [],
+    });
+    expect(result.reasons).toEqual([
+      {
+        factor: "open_role",
+        points: 2,
+        text: "Hiring: Software Engineering Intern. Software engineering internship; fits your target roles.",
+        source_url: CAREERS,
+      },
+    ]);
+  });
+
+  it("gives no points when nothing fits or everything is unclear", () => {
+    const result = scoreCompany({
+      profile,
+      company: {
+        ...emptyCompany,
+        open_roles: roles,
+        role_fit: fitRecord(fitKey(profile), [
+          ["unclear", "Level isn't stated."],
+          ["no_fit", "Asks for a PhD."],
+        ]),
+      },
+      contacts: [],
+    });
+    expect(result.score).toBe(0);
+  });
+
+  it("falls back to title matching, labelled, once the profile changed", () => {
+    const result = scoreCompany({
+      profile: { ...profile, major: "Computer Science" },
+      company: { ...emptyCompany, open_roles: roles, role_fit: fitRecord(fitKey(profile), [["no_fit", "x"], ["no_fit", "y"]]) },
+      contacts: [],
+    });
+    expect(result.reasons[0].text).toBe("Hiring: Software Engineering Intern and 1 more matching role (fit not checked yet)");
   });
 });

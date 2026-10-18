@@ -5,12 +5,15 @@ import { Suspense, type ReactNode } from "react";
 
 import { displayName } from "@/lib/domain";
 import { availableHooks, draftFacts, MAX_WORDS } from "@/lib/drafts";
+import { canCheckFit, currentFits, fitFor, fitKey, VERDICT_LABELS, type FitVerdict } from "@/lib/fit";
+import { roleTiming } from "@/lib/roles";
 import { redactSecrets } from "@/lib/redact";
 import type { Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
 import { LocalDate } from "../../local-date";
 import { AddPersonForm } from "./add-person";
+import { CheckFitButton } from "./check-fit-button";
 import { RenameForm } from "./rename-form";
 import { StatusPanel } from "./status-panel";
 import { DraftPanel } from "./draft-panel";
@@ -51,7 +54,7 @@ async function Company({ id }: { id: string }) {
   const [companyResult, contactsResult, draftResult, profileResult] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons, connection, connection_source_url")
+      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons, connection, connection_source_url, role_fit")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -68,7 +71,7 @@ async function Company({ id }: { id: string }) {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase.from("profiles").select("school, hometown, interests, role_targets").maybeSingle(),
+    supabase.from("profiles").select("school, hometown, interests, role_targets, grad_year, degree, major, resume").maybeSingle(),
   ]);
 
   if (companyResult.error) {
@@ -86,6 +89,11 @@ async function Company({ id }: { id: string }) {
     location: string | null;
     source_url: string;
   }[];
+  // Fit verdicts count only while they match the current profile.
+  const profile = profileResult.data;
+  const fits = profile ? currentFits(company.role_fit, fitKey(profile)) : null;
+  const staleFit = !fits && !!company.role_fit;
+  const today = new Date();
 
   return (
     <article className="mt-6 flex flex-col">
@@ -209,17 +217,43 @@ async function Company({ id }: { id: string }) {
             {company.enriched_at ? "None listed on the pages that were read." : "Not looked up yet."}
           </p>
         ) : (
-          <ul className="mt-3 flex flex-col divide-y divide-rule border-y border-rule">
-            {roles.map((r, i) => (
-              <li key={i} className="flex flex-col gap-1 py-3">
-                <p className="text-lg font-semibold wrap-anywhere">{r.title}</p>
-                <p className="text-base text-muted">
-                  {r.location && `${r.location}. `}
-                  <SourceLink url={r.source_url} />
-                </p>
-              </li>
-            ))}
-          </ul>
+          <>
+            <p className="mt-2 text-base text-muted">
+              {!canCheckFit(profile)
+                ? "Add the internship roles you want on your profile to check which of these fit you."
+                : fits
+                  ? "Checked against your profile. Only roles that fit count toward the score."
+                  : staleFit
+                    ? "Your profile changed since fit was checked, so the score matches role titles for now."
+                    : "Fit isn’t checked yet, so the score matches role titles for now."}
+            </p>
+            <ul className="mt-3 flex flex-col divide-y divide-rule border-y border-rule">
+              {roles.map((r, i) => {
+                const fit = fitFor(fits, r);
+                // Past dates are flagged even before fit is checked.
+                const verdict: FitVerdict | null = fit?.verdict ?? (roleTiming(r.title, today) === "past" ? "past" : null);
+                return (
+                  <li key={i} className="flex flex-col gap-1 py-3">
+                    <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <span className="text-lg font-semibold wrap-anywhere">{r.title}</span>
+                      {verdict && <VerdictBadge verdict={verdict} />}
+                    </p>
+                    {fit && <p className="text-base">{fit.reason}</p>}
+                    {!fit && verdict === "past" && <p className="text-base">The dates in the title have passed, so it isn’t open now.</p>}
+                    <p className="text-base text-muted">
+                      {r.location && `${r.location}. `}
+                      <SourceLink url={r.source_url} />
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+            {canCheckFit(profile) && (
+              <div className="mt-4">
+                <CheckFitButton companyId={company.id} label={fits ? "Check fit again" : "Check fit"} />
+              </div>
+            )}
+          </>
         )}
       </section>
 
@@ -314,6 +348,17 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
       <dd className="wrap-anywhere">{children || <span className="text-muted">Unknown</span>}</dd>
     </>
   );
+}
+
+// A role's fit. Only "Fits you" counts toward the score.
+function VerdictBadge({ verdict }: { verdict: FitVerdict }) {
+  const style =
+    verdict === "fits"
+      ? "border-accent bg-accent text-accent-foreground"
+      : verdict === "unclear"
+        ? "border-rule text-muted"
+        : "border-danger text-danger";
+  return <span className={`rounded-sm border px-2 py-0.5 text-sm font-medium whitespace-nowrap ${style}`}>{VERDICT_LABELS[verdict]}</span>;
 }
 
 // Links a fact to the page it came from, labelled with that page's path.

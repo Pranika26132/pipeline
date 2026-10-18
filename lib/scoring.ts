@@ -3,6 +3,9 @@
 // research), facts the user typed or imported themselves, and the user's
 // profile. Nothing is guessed; a factor without a stated fact doesn't count.
 
+import { currentFits, fitFor, fitKey, isSeniorTitle } from "./fit";
+import { roleTiming } from "./roles";
+
 export type Factor = "school" | "hometown" | "open_role" | "early_stage";
 
 export type Reason = {
@@ -23,6 +26,8 @@ export type ScoreInput = {
     // From an imported list's "connection" column, e.g. "Duke".
     connection?: string | null;
     connection_source_url?: string | null;
+    // Claude's per-role verdicts (lib/fit.ts), with the profile key they were judged against.
+    role_fit?: unknown;
   };
   contacts: {
     name: string;
@@ -48,7 +53,14 @@ export type ScoreInput = {
     weight_hometown: number;
     weight_open_role: number;
     weight_early_stage: number;
+    // Role fit is judged against these too (lib/fit.ts fitKey).
+    degree?: string | null;
+    major?: string | null;
+    grad_year?: number | null;
+    resume?: string | null;
   };
+  // Roles whose dates are before this don't count. Defaults to now.
+  today?: Date;
 };
 
 export type ScoreResult = { score: number; reasons: Reason[] };
@@ -60,7 +72,7 @@ export const FACTOR_LABELS: Record<Factor, string> = {
   early_stage: "Early stage",
 };
 
-export function scoreCompany({ company, contacts, profile }: ScoreInput): ScoreResult {
+export function scoreCompany({ company, contacts, profile, today = new Date() }: ScoreInput): ScoreResult {
   const reasons: Reason[] = [];
   const add = (factor: Factor, weight: number, found: Omit<Reason, "factor" | "points"> | null) => {
     // A weight of 0 means "doesn't matter": no points and no reason shown.
@@ -96,7 +108,7 @@ export function scoreCompany({ company, contacts, profile }: ScoreInput): ScoreR
     add("hometown", profile.weight_hometown, found);
   }
 
-  add("open_role", profile.weight_open_role, roleReason(company.open_roles, profile.role_targets));
+  add("open_role", profile.weight_open_role, roleReason(company, profile, today));
   add("early_stage", profile.weight_early_stage, earlyStageReason(company));
 
   // Strongest reason first, so the list can show the top one.
@@ -295,18 +307,38 @@ export function roleMatches(target: string, title: string): boolean {
 
 type Role = { title: string; location: string | null; source_url: string };
 
-function roleReason(openRoles: unknown, targets: string[]) {
-  if (!Array.isArray(openRoles) || targets.length === 0) return null;
-  const roles = openRoles.filter(
+// Once Claude has checked fit against the current profile, only roles it
+// says fit count, with its reason. Before that (never checked, or the
+// profile changed since), titles matching a target role count, except
+// senior titles and roles whose dates have passed, and the reason says the
+// fit wasn't checked.
+function roleReason(company: ScoreInput["company"], profile: ScoreInput["profile"], today: Date) {
+  const targets = profile.role_targets;
+  if (!Array.isArray(company.open_roles) || targets.length === 0) return null;
+  const roles = company.open_roles.filter(
     (r): r is Role => typeof r?.title === "string" && isHttpUrl(r?.source_url),
   );
-  const matching = roles.filter((r) => targets.some((t) => roleMatches(t, r.title)));
-  if (matching.length === 0) return null;
   // An internship is the most relevant opening to name.
-  const best = matching.find((r) => /\bintern(ship)?s?\b/i.test(r.title)) ?? matching[0];
-  const others = matching.length - 1;
-  const more = others === 0 ? "" : others === 1 ? " and 1 more matching role" : ` and ${others} more matching roles`;
-  return { text: `Hiring: ${best.title}${more}`, source_url: best.source_url };
+  const pick = (list: Role[]) => list.find((r) => /\bintern(ship)?s?\b/i.test(r.title)) ?? list[0];
+
+  const fits = currentFits(company.role_fit, fitKey(profile));
+  if (fits) {
+    const fitting = roles.filter((r) => fitFor(fits, r)?.verdict === "fits");
+    if (fitting.length === 0) return null;
+    const best = pick(fitting);
+    return { text: `Hiring: ${best.title}${more(fitting.length - 1, "role that fits", "roles that fit")}. ${fitFor(fits, best)!.reason}`, source_url: best.source_url };
+  }
+
+  const matching = roles.filter(
+    (r) => targets.some((t) => roleMatches(t, r.title)) && roleTiming(r.title, today) !== "past" && !isSeniorTitle(r.title),
+  );
+  if (matching.length === 0) return null;
+  const best = pick(matching);
+  return { text: `Hiring: ${best.title}${more(matching.length - 1, "matching role", "matching roles")} (fit not checked yet)`, source_url: best.source_url };
+}
+
+function more(n: number, one: string, many: string) {
+  return n === 0 ? "" : n === 1 ? ` and 1 more ${one}` : ` and ${n} more ${many}`;
 }
 
 // Early stage ---------------------------------------------------------------------

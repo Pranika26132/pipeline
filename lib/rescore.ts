@@ -38,7 +38,7 @@ export async function rescore(supabase: Supabase, companyId?: string): Promise<{
 async function rescoreOnce(supabase: Supabase, companyId?: string): Promise<{ error: string } | { skipped: number }> {
   const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
-    .select("school, hometown, role_targets, weight_school, weight_hometown, weight_open_role, weight_early_stage, updated_at")
+    .select("school, hometown, role_targets, degree, major, grad_year, resume, weight_school, weight_hometown, weight_open_role, weight_early_stage, updated_at")
     .maybeSingle();
   if (profileError) return { error: `Couldn't load your profile (${profileError.message}).` };
   const profile: ScoreInput["profile"] = profileRow ?? DEFAULT_PROFILE;
@@ -47,7 +47,7 @@ async function rescoreOnce(supabase: Supabase, companyId?: string): Promise<{ er
   const companies = await readAll<ScoreRow>((from, to) => {
     let q = supabase
       .from("companies")
-      .select("id, enriched_at, facts_version, stage, size, open_roles, field_sources, connection, connection_source_url")
+      .select("id, enriched_at, facts_version, stage, size, open_roles, field_sources, connection, connection_source_url, role_fit")
       .order("id");
     if (companyId) q = q.eq("id", companyId);
     return q.range(from, to);
