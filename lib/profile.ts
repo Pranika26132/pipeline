@@ -64,6 +64,7 @@ export const LIMITS = {
 
 // The form's fields as typed, so they can be shown again after an error.
 export type ProfileValues = {
+  fullName: string;
   school: string;
   hometown: string;
   interests: string[];
@@ -77,6 +78,7 @@ export type ProfileValues = {
 export function readProfileForm(formData: FormData): ProfileValues {
   const text = (name: string) => String(formData.get(name) ?? "");
   return {
+    fullName: text("fullName"),
     school: text("school"),
     hometown: text("hometown"),
     interests: formData.getAll("interests").map(String),

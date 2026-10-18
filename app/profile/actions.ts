@@ -34,6 +34,8 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
   if (authError) return fail(`Your session couldn't be checked (${authError.message}). Sign in again.`);
   if (!auth?.claims) return fail("You're signed out. Sign in again to save your profile.");
 
+  const fullName = values.fullName.trim().replace(/\s+/g, " ");
+  if (fullName.length > 100) return fail("Keep your name under 100 characters.");
   const school = values.school.trim();
   const hometown = values.hometown.trim();
   if (school.length > LIMITS.text) return fail(`Keep your school under ${LIMITS.text} characters.`);
@@ -75,6 +77,7 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
   const { error } = await supabase.from("profiles").upsert(
     {
       user_id: auth.claims.sub,
+      full_name: fullName || null,
       school: school || null,
       hometown: hometown || null,
       interests,
@@ -98,6 +101,7 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
     saved: true,
     error: scoreError,
     values: {
+      fullName,
       school,
       hometown,
       interests,

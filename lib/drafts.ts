@@ -2,6 +2,7 @@
 // may use, the checks every draft must pass, and the Gmail compose link.
 // The app never sends anything.
 
+import { roleTiming } from "./roles";
 import type { Reason } from "./scoring";
 
 export const MAX_WORDS = 120;
@@ -44,17 +45,18 @@ export type Hook = "auto" | "alumni" | "hometown" | "role" | "product";
 
 export const HOOKS: { value: Hook; label: string }[] = [
   { value: "auto", label: "Best available" },
+  { value: "product", label: "What they build" },
+  { value: "role", label: "An internship role" },
   { value: "alumni", label: "Same school" },
   { value: "hometown", label: "Same hometown" },
-  { value: "role", label: "An open role" },
-  { value: "product", label: "What they build" },
 ];
 
-// "recipient" says who the email is to; it can't be the company fact a draft
-// leads with.
+// "company": what they build, a role, stage or size (a draft uses exactly
+// one). "connection": a shared school or hometown (at most one, optional).
+// "recipient" says who the email is to. "me": the student's own facts.
 export type DraftFact = {
   id: string;
-  kind: "company" | "person" | "recipient" | "me";
+  kind: "company" | "connection" | "recipient" | "me";
   hook?: Exclude<Hook, "auto">;
   text: string;
   source?: string | null;
@@ -72,50 +74,59 @@ export type DraftInput = {
   };
   contact: { name: string; title: string | null; school: string | null; hometown: string | null; schoolCounts: boolean; hometownCounts: boolean } | null;
   profile: { school: string | null; hometown: string | null; interests: string[]; role_targets: string[] } | null;
+  // Roles whose dates are before this are treated as past.
+  today: Date;
 };
 
 // Every fact a draft may use, numbered, with where it came from. Only facts
 // that came from a lookup (with a source), the user's own additions, or the
 // user's profile go in; a researched fact that isn't "stated" doesn't.
-export function draftFacts({ company, contact, profile }: DraftInput): DraftFact[] {
+export function draftFacts({ company, contact, profile, today }: DraftInput): DraftFact[] {
   const facts: DraftFact[] = [];
   const sources = (company.field_sources ?? {}) as Record<string, string | undefined>;
   const add = (f: Omit<DraftFact, "id">) => facts.push({ ...f, id: `F${facts.length + 1}` });
 
-  if (company.summary) add({ kind: "company", hook: "product", text: `What ${company.name} does: ${company.summary}`, source: sources.summary });
-  if (company.stage) add({ kind: "company", text: `${company.name}'s stage: ${company.stage}`, source: sources.stage });
-  if (company.size) add({ kind: "company", text: `${company.name}'s size: ${company.size}`, source: sources.size });
+  if (company.summary) add({ kind: "company", hook: "product", text: `What ${company.name} builds: ${company.summary}`, source: sources.summary });
   const roles = (Array.isArray(company.open_roles) ? company.open_roles : []) as { title?: unknown; location?: unknown; source_url?: unknown }[];
   for (const r of roles.slice(0, 5)) {
     if (typeof r.title !== "string") continue;
     const where = typeof r.location === "string" && r.location ? ` (${r.location})` : "";
-    add({ kind: "company", hook: "role", text: `${company.name} lists an open role: ${r.title}${where}`, source: typeof r.source_url === "string" ? r.source_url : null });
+    const source = typeof r.source_url === "string" ? r.source_url : null;
+    // A role whose dates have passed isn't open: it shows they hire interns.
+    const text =
+      roleTiming(r.title, today) === "past"
+        ? `${company.name} hired for "${r.title}"; those dates have passed, so it is not open now. It shows they hire interns of this kind: ask about upcoming internships, never present this role as open.`
+        : `${company.name} lists an open role: ${r.title}${where}`;
+    add({ kind: "company", hook: "role", text, source });
   }
+  if (company.stage) add({ kind: "company", text: `${company.name}'s stage: ${company.stage}`, source: sources.stage });
+  if (company.size) add({ kind: "company", text: `${company.name}'s size: ${company.size}`, source: sources.size });
+
   // Score reasons are already checked facts with their sources.
   const reasons = (Array.isArray(company.score_reasons) ? company.score_reasons : []) as Reason[];
   for (const r of reasons) {
-    if (r.factor === "school") add({ kind: "company", hook: "alumni", text: r.text, source: r.source_url });
-    if (r.factor === "hometown") add({ kind: "company", hook: "hometown", text: r.text, source: r.source_url });
+    if (r.factor === "school") add({ kind: "connection", hook: "alumni", text: r.text, source: r.source_url });
+    if (r.factor === "hometown") add({ kind: "connection", hook: "hometown", text: r.text, source: r.source_url });
   }
 
   if (contact) {
     add({ kind: "recipient", text: `The email is to ${contact.name}${contact.title ? `, ${contact.title} at ${company.name}` : ` at ${company.name}`}` });
-    if (contact.school && contact.schoolCounts) add({ kind: "person", hook: "alumni", text: `${contact.name} went to ${contact.school}` });
-    if (contact.hometown && contact.hometownCounts) add({ kind: "person", hook: "hometown", text: `${contact.name} is from ${contact.hometown}` });
+    if (contact.school && contact.schoolCounts) add({ kind: "connection", hook: "alumni", text: `${contact.name} went to ${contact.school}` });
+    if (contact.hometown && contact.hometownCounts) add({ kind: "connection", hook: "hometown", text: `${contact.name} is from ${contact.hometown}` });
   }
 
   if (profile?.school) add({ kind: "me", text: `I go to ${profile.school}` });
   if (profile?.hometown) add({ kind: "me", text: `I'm from ${profile.hometown}` });
-  if (profile?.interests.length) add({ kind: "me", text: `My interests: ${profile.interests.join(", ")}` });
-  if (profile?.role_targets.length) add({ kind: "me", text: `Internship roles I'm looking for: ${profile.role_targets.join(", ")}` });
+  if (profile?.role_targets.length) {
+    add({ kind: "me", text: `Internships I'm looking for (name at most one that fits this company; never list them): ${profile.role_targets.join(", ")}` });
+  }
   return facts;
 }
 
-// The hooks the facts can support, best first: a shared school or hometown
-// beats an open role, which beats what they build.
+// The hooks the facts can support, in the order the menu shows them.
 export function availableHooks(facts: DraftFact[]): Exclude<Hook, "auto">[] {
-  const order: Exclude<Hook, "auto">[] = ["alumni", "hometown", "role", "product"];
-  return order.filter((h) => facts.some((f) => f.hook === h && (f.kind === "company" || f.kind === "person")));
+  const order: Exclude<Hook, "auto">[] = ["product", "role", "alumni", "hometown"];
+  return order.filter((h) => facts.some((f) => f.hook === h && (f.kind === "company" || f.kind === "connection")));
 }
 
 export function wordCount(text: string): number {
@@ -124,7 +135,15 @@ export function wordCount(text: string): number {
 
 // Everything a draft must pass before it's shown. Returns the problems, in
 // plain words, so they can be fixed (by a retry) or shown.
-export function checkDraft(draft: { subject: string; body: string }, facts: DraftFact[], companyFact: string): string[] {
+// `used`: the company fact the draft names (required) and the connection fact
+// (optional). `extraKnown`: other text the student wrote (writing samples),
+// where a number or detail about them may come from.
+export function checkDraft(
+  draft: { subject: string; body: string },
+  facts: DraftFact[],
+  used: { company: string; connection?: string | null },
+  extraKnown = "",
+): string[] {
   const problems: string[] = [];
   const words = wordCount(draft.body);
   if (words >= MAX_WORDS) problems.push(`The body is ${words} words; it must be under ${MAX_WORDS}.`);
@@ -136,7 +155,7 @@ export function checkDraft(draft: { subject: string; body: string }, facts: Draf
   if (/\[[^\]]*\]|\{[^}]*\}|<[^>]*>/.test(draft.body + draft.subject)) problems.push("It has a placeholder in brackets.");
   // A number the facts don't contain was made up ("5 million users").
   // Numbers are compared as whole tokens, so "20" isn't found inside "2027".
-  const known = facts.map((f) => f.text).join(" ");
+  const known = `${facts.map((f) => f.text).join(" ")} ${extraKnown}`;
   const tokens = (t: string) => new Set((t.match(/\d[\d,.]*/g) ?? []).map((n) => n.replace(/[.,]+$/, "").replace(/,/g, "")));
   const knownNumbers = tokens(known);
   // Durations in the ask ("a 15-minute call", "15–20 minutes") aren't claims.
@@ -148,10 +167,10 @@ export function checkDraft(draft: { subject: string; body: string }, facts: Draf
   // Links and addresses only come from the user, never from page text.
   const links = [...(draft.subject + " " + draft.body).matchAll(/\bhttps?:\/\/\S+|\bwww\.\S+|[^\s@]+@[^\s@]+\.[^\s@]+/gi)].map((m) => m[0]);
   if (links.length) problems.push(`It has a link or email address: ${links.join(", ")}.`);
-  const used = facts.find((f) => f.id === companyFact);
-  // The lead fact must be about the company or a person's school or hometown.
-  if (!used || !(used.kind === "company" || (used.kind === "person" && used.hook))) {
-    problems.push("It doesn't name which company fact it uses.");
+  // Exactly one company fact, and at most one shared school or hometown.
+  if (facts.find((f) => f.id === used.company)?.kind !== "company") problems.push("It doesn't name which company fact it uses.");
+  if (used.connection && facts.find((f) => f.id === used.connection)?.kind !== "connection") {
+    problems.push("The connection it names isn't a shared school or hometown from the facts.");
   }
   return problems;
 }
