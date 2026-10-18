@@ -57,7 +57,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   const [companyResult, contactResult, profileResult] = await Promise.all([
     supabase
       .from("companies")
-      .select("name, domain, summary, stage, size, open_roles, score_reasons, field_sources")
+      .select("name, domain, summary, stage, size, open_roles, score_reasons, field_sources, role_fit")
       .eq("id", id)
       .maybeSingle(),
     contactId
@@ -68,7 +68,10 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
           .eq("company_id", id)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    supabase.from("profiles").select("full_name, school, hometown, interests, role_targets, writing_samples").maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("full_name, school, hometown, interests, role_targets, writing_samples, grad_year, degree, major, resume")
+      .maybeSingle(),
   ]);
   if (companyResult.error) return fail(500, `Couldn't load the company (${companyResult.error.message}).`);
   if (!companyResult.data) return fail(404, "That company isn't in your list.");

@@ -17,7 +17,7 @@ Rules:
 - company_name: the company's name as its pages write it (for example "Turbo AI", not "turbo.ai"); null if unclear.
 - summary: one or two plain sentences on what the company does, from the pages. If the pages don't say what it does, summary.value is null. Never describe the pages themselves or what they lack.
 - stage: funding stage or accelerator batch only if stated (for example "Seed", "Series A", "YC W24"). size: headcount only if stated. Otherwise null.
-- open_roles: job openings listed on the pages, with title as written and location if stated.
+- open_roles: job openings listed on the pages, with title as written and location if stated. details: one short excerpt copied exactly from the listing that states the level, experience, degree or dates asked for (for example "Open to rising juniors and seniors" or "3+ years of experience"); null if the page states none.
 - people: founders and team members named on the pages, with title if stated.
 - When nothing is stated, use null or an empty list.`;
 
@@ -38,8 +38,8 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "location", "source_url"],
-        properties: { title: { type: "string" }, location: nullableString, source_url: { type: "string" } },
+        required: ["title", "location", "details", "source_url"],
+        properties: { title: { type: "string" }, location: nullableString, details: nullableString, source_url: { type: "string" } },
       },
     },
     people: {
@@ -71,7 +71,8 @@ function fact() {
 }
 
 export type Fact = { value: string; source_url: string } | null;
-export type Role = { title: string; location: string | null; source_url: string };
+// `details`: an excerpt from the listing about level or requirements, used to judge fit.
+export type Role = { title: string; location: string | null; details?: string | null; source_url: string };
 export type Person = {
   name: string;
   title: string | null;
@@ -84,7 +85,7 @@ export type Extraction = { companyName: string | null; summary: Fact; stage: Fac
 // The model's reply wasn't usable JSON. Carries a message for the user.
 export class BadModelOutputError extends Error {}
 
-const LIMITS = { summary: 600, short: 120, items: 40 };
+const LIMITS = { summary: 600, short: 120, details: 300, items: 40 };
 
 // `apiKey` is checked by the caller (isWellFormedApiKey) before it gets here.
 export async function extract(apiKey: string, companyName: string, pages: PageText[]): Promise<Extraction> {
@@ -149,7 +150,14 @@ function validate(raw: unknown, pages: PageText[]): Extraction {
     if (!isObject(r) || !cited(r.source_url)) continue;
     const title = str(r.title, LIMITS.short);
     if (!title || !onPage(title, r.source_url)) continue;
-    open_roles.push({ title, location: str(r.location, LIMITS.short), source_url: r.source_url });
+    // Kept only when it's copied from the cited page, not paraphrased.
+    const details = str(r.details, LIMITS.details);
+    open_roles.push({
+      title,
+      location: str(r.location, LIMITS.short),
+      details: details && byUrl.get(r.source_url)!.includes(normalize(details)) ? details : null,
+      source_url: r.source_url,
+    });
   }
 
   const people: Person[] = [];

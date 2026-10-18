@@ -6,6 +6,7 @@ import {
   INTERESTS,
   isLevel,
   LIMITS,
+  parseGradYear,
   readProfileForm,
   ROLE_PRESETS,
   WEIGHTS,
@@ -40,6 +41,18 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
   const hometown = values.hometown.trim();
   if (school.length > LIMITS.text) return fail(`Keep your school under ${LIMITS.text} characters.`);
   if (hometown.length > LIMITS.text) return fail(`Keep your hometown or region under ${LIMITS.text} characters.`);
+
+  const grad = parseGradYear(values.gradYear);
+  if ("error" in grad) return fail(grad.error);
+  const degree = values.degree.trim().replace(/\s+/g, " ");
+  const major = values.major.trim().replace(/\s+/g, " ");
+  if (degree.length > LIMITS.degree) return fail(`Keep your degree under ${LIMITS.degree} characters.`);
+  if (major.length > LIMITS.major) return fail(`Keep your major under ${LIMITS.major} characters.`);
+  // Only the text is stored; an uploaded PDF never reaches this action.
+  const resume = values.resume.replace(/\r\n?/g, "\n").trim();
+  if (resume.length > LIMITS.resume) {
+    return fail(`Your resume is ${resume.length.toLocaleString("en-US")} characters. Keep it under ${LIMITS.resume.toLocaleString("en-US")}.`);
+  }
 
   const allowedInterests = new Set<string>(INTERESTS.map((i) => i.value));
   const interests = INTERESTS.map((i) => i.value).filter((v) => values.interests.includes(v));
@@ -80,6 +93,10 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
       full_name: fullName || null,
       school: school || null,
       hometown: hometown || null,
+      grad_year: grad.year,
+      degree: degree || null,
+      major: major || null,
+      resume: resume || null,
       interests,
       role_targets: roleTargets,
       writing_samples: samples,
@@ -90,7 +107,8 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
   );
   if (error) return fail(`Couldn't save your profile (${error.message}). Nothing was changed.`);
 
-  // School, hometown, roles and weights all change scores.
+  // School, hometown, roles, major, resume and weights all change scores
+  // (role fit judged against an older profile no longer counts as checked).
   const scored = await rescore(supabase);
   revalidatePath("/", "layout");
   const scoreError = scored.error && `Profile saved, but your list couldn't be re-ranked. ${scored.error} Save again to retry.`;
@@ -104,6 +122,10 @@ export async function saveProfile(_prev: ProfileState, formData: FormData): Prom
       fullName,
       school,
       hometown,
+      gradYear: grad.year ? String(grad.year) : "",
+      degree,
+      major,
+      resume,
       interests,
       roles: presetRoles,
       otherRoles: roleTargets.filter((r) => !presets.has(r)).join(", "),
