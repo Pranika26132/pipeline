@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { bumpFactsVersion } from "@/lib/facts";
-import { saveDraft } from "@/lib/outreach";
+import { saveDraft, setStatus, STATUS_VALUES, type OutreachStatus } from "@/lib/outreach";
 import { rescore } from "@/lib/rescore";
 import { createClient } from "@/lib/supabase/server";
 
@@ -124,6 +124,29 @@ export async function renameCompany(companyId: string, _prev: RenameState, formD
   const { data, error } = await supabase.from("companies").update({ name }).eq("id", companyId).select("id");
   if (error) return { error: `Couldn't rename the company (${error.message}).` };
   if (data.length === 0) return { error: "That company isn't in your list." };
+  revalidatePath("/", "layout");
+  return { savedAt: Date.now() };
+}
+
+export type StatusState = { error?: string; savedAt?: number };
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Sets the company's outreach status and follow-up date.
+export async function saveStatus(companyId: string, _prev: StatusState, formData: FormData): Promise<StatusState> {
+  const status = String(formData.get("status") ?? "");
+  const followUp = String(formData.get("followUpOn") ?? "").trim();
+  const supabase = await createClient();
+  const { data: auth, error: authError } = await supabase.auth.getClaims();
+  if (authError) return { error: `Your session couldn't be checked (${authError.message}). Sign in again.` };
+  if (!auth?.claims) return { error: "You're signed out. Sign in again to save the status." };
+  if (!UUID.test(companyId)) return { error: "That company isn't in your list." };
+  if (!(STATUS_VALUES as readonly string[]).includes(status)) return { error: "Pick a status from the list." };
+  if (followUp && (!DATE.test(followUp) || Number.isNaN(Date.parse(followUp)))) {
+    return { error: "The follow-up date isn't a real date." };
+  }
+  const saved = await setStatus(supabase, companyId, { status: status as OutreachStatus, followUpOn: followUp || null });
+  if (saved.error) return { error: saved.error };
   revalidatePath("/", "layout");
   return { savedAt: Date.now() };
 }

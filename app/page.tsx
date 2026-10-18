@@ -19,6 +19,7 @@ import { isProfileEmpty } from "@/lib/profile";
 import type { Factor, Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
+import { FollowUpBadge } from "./follow-up-badge";
 import { LookUpAll } from "./look-up-all";
 import { SignOutButton } from "./sign-out-button";
 
@@ -93,14 +94,15 @@ async function TargetList({ filters }: { filters: Filters }) {
       .limit(LIST_LIMIT),
   ]);
 
-  const statusOf = new Map<string, Status>("rows" in outreach ? outreach.rows : []);
+  const statusOf = new Map<string, StatusRow>("rows" in outreach ? outreach.rows : []);
   const rows = (companies ?? []).map((c) => {
     const reasons = (Array.isArray(c.score_reasons) ? c.score_reasons : []) as Reason[];
     return {
       ...c,
       reasons,
       factors: reasons.map((r) => r.factor) as Factor[],
-      status: statusOf.get(c.id) ?? ("to_contact" as Status),
+      status: statusOf.get(c.id)?.status ?? ("to_contact" as Status),
+      followUpOn: statusOf.get(c.id)?.followUpOn ?? null,
     };
   });
   const shown = rows.filter((r) => matchesFilters(r, filters));
@@ -205,13 +207,14 @@ async function TargetList({ filters }: { filters: Filters }) {
                       ) : (
                         c.name !== c.domain && <span className="text-base text-muted wrap-anywhere">{c.domain}</span>
                       )}
-                      {(c.needs_manual_info || c.status !== "to_contact") && (
+                      {(c.needs_manual_info || c.status !== "to_contact" || c.followUpOn) && (
                         <span className="mt-1 flex flex-wrap gap-2">
                           {c.status !== "to_contact" && (
                             <span className="rounded-sm border border-foreground px-2 py-0.5 text-sm font-medium">
                               {STATUSES.find((s) => s.value === c.status)?.label}
                             </span>
                           )}
+                          {c.followUpOn && <FollowUpBadge date={c.followUpOn} />}
                           {c.needs_manual_info && (
                             <span className="rounded-sm border border-danger px-2 py-0.5 text-sm font-medium text-danger">
                               Needs info
@@ -245,16 +248,18 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 // Reads the company_status view page by page: a single read stops at the
 // API's row cap (1000) without an error.
-async function readStatuses(supabase: Supabase): Promise<{ rows: [string, Status][] } | { error: string }> {
-  const rows: [string, Status][] = [];
+type StatusRow = { status: Status; followUpOn: string | null };
+
+async function readStatuses(supabase: Supabase): Promise<{ rows: [string, StatusRow][] } | { error: string }> {
+  const rows: [string, StatusRow][] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("company_status")
-      .select("company_id, status")
+      .select("company_id, status, follow_up_on")
       .order("company_id")
       .range(from, from + 999);
     if (error) return { error: error.message };
-    for (const r of data) rows.push([r.company_id, r.status as Status]);
+    for (const r of data) rows.push([r.company_id, { status: r.status as Status, followUpOn: r.follow_up_on }]);
     if (data.length < 1000) return { rows };
   }
 }

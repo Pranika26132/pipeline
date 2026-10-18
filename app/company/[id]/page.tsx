@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { LocalDate } from "../../local-date";
 import { AddPersonForm } from "./add-person";
 import { RenameForm } from "./rename-form";
+import { StatusPanel } from "./status-panel";
 import { DraftPanel } from "./draft-panel";
 import { EnrichButton, ResearchButton } from "./enrich-button";
 
@@ -62,7 +63,7 @@ async function Company({ id }: { id: string }) {
       .order("name"),
     supabase
       .from("outreach")
-      .select("subject, draft, contact_id")
+      .select("subject, draft, contact_id, status, follow_up_on, sent_at")
       .eq("company_id", id)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -128,6 +129,22 @@ async function Company({ id }: { id: string }) {
               ))}
             </ul>
           </div>
+        )}
+      </section>
+
+      <section aria-labelledby="status" className="mt-8 border-t-2 border-foreground pt-6">
+        <h2 id="status" className="sr-only">
+          Status
+        </h2>
+        {draftResult.error ? (
+          <Alert>Couldn’t load the status ({draftResult.error.message}). Reload to try again.</Alert>
+        ) : (
+          <StatusPanel
+            companyId={company.id}
+            status={draftResult.data?.status ?? "to_contact"}
+            followUpOn={draftResult.data?.follow_up_on ?? null}
+            sentAt={draftResult.data?.sent_at ?? null}
+          />
         )}
       </section>
 
