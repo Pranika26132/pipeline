@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkCandidates, mergeVerified, namesCompany, parseCandidates, urlKey } from "./find";
+import { acceptConnections, checkCandidates, mergeVerified, namesCompany, parseCandidates, urlKey, withBackedWhy } from "./find";
 
 describe("parseCandidates", () => {
   it("reads the last <companies> block and drops incomplete rows", () => {
@@ -65,7 +65,8 @@ describe("mergeVerified", () => {
       ],
     });
     expect(companies.map((c) => c.name)).toEqual(["A"]);
-    expect(companies[0].why).toBe("search why");
+    // The search step's note is never shown: it isn't checked.
+    expect(companies[0].why).toBe("");
     expect(leftOut).toEqual(["B: its home page doesn't say what it does.", "C: doesn't meet your request. Based in Ohio, not NYC."]);
   });
 });
@@ -74,5 +75,64 @@ describe("urlKey across scheme and www", () => {
   it("treats http/https and www as the same page, keeping the query", () => {
     expect(urlKey("http://www.News.test/a/?id=1")).toBe(urlKey("https://news.test/a?id=1"));
     expect(urlKey("https://news.test/a?id=1")).not.toBe(urlKey("https://news.test/a?id=2"));
+  });
+});
+
+describe("acceptConnections", () => {
+  const profile = { school: "University of Minnesota", hometown: "Minneapolis, MN", interests: [], role_targets: [] };
+  const page = {
+    url: "https://acme.test/",
+    text: "Acme builds lab robots. Our headquarters is in St. Paul, Minnesota. Jane Doe, CEO, studied at the University of Minnesota. Jane Doe and Sam Lee grew up in Minneapolis, MN.",
+  };
+  const quotes = [{ text: "Sam Lee, Acme's CTO, is from Minneapolis, MN.", url: "https://news.test/acme" }];
+
+  it("keeps quoted, sourced connections that match the profile", () => {
+    const out = acceptConnections(
+      [
+        { kind: "office", value: "St. Paul, Minnesota", person: "", quote: "Our headquarters is in St. Paul, Minnesota." },
+        { kind: "school", value: "University of Minnesota", person: "Jane Doe", quote: "Jane Doe, CEO, studied at the University of Minnesota." },
+        { kind: "hometown", value: "Minneapolis, MN", person: "Sam Lee", quote: "Sam Lee, Acme's CTO, is from Minneapolis, MN." },
+      ],
+      page,
+      quotes,
+      profile,
+    );
+    expect(out.map((c) => `${c.kind}:${c.value}:${c.source_url}`)).toEqual([
+      "office:St. Paul, Minnesota:https://acme.test/",
+      "school:University of Minnesota:https://acme.test/",
+      "hometown:Minneapolis, MN:https://news.test/acme",
+    ]);
+  });
+
+  it("drops a claim with no exact quote, a quote about several people, or a place that isn't the user's", () => {
+    const out = acceptConnections(
+      [
+        // Paraphrased, not on any page.
+        { kind: "office", value: "Minnesota", person: "", quote: "The company is based in Minnesota." },
+        // A sentence about two people: "shared", as in founder research.
+        { kind: "hometown", value: "Minneapolis, MN", person: "Jane Doe", quote: "Jane Doe and Sam Lee grew up in Minneapolis, MN." },
+        // Real quote, but not the user's region.
+        { kind: "office", value: "Austin, Texas", person: "", quote: "Acme builds lab robots." },
+      ],
+      page,
+      quotes,
+      profile,
+    );
+    expect(out).toEqual([]);
+  });
+});
+
+describe("withBackedWhy", () => {
+  const profile = { school: "Duke University", hometown: "Minneapolis, MN", interests: [], role_targets: [] };
+  const office = { kind: "office" as const, value: "Minneapolis, MN", person: null, quote: "10 2nd St NE, Minneapolis, MN 55413", source_url: "https://a.test/" };
+  it("drops a reason that claims the user's region without a quoted connection", () => {
+    expect(withBackedWhy("Minneapolis-based AI startup with seed funding.", [], profile).why).toBe("");
+    expect(withBackedWhy("Has a Minnesota connection.", [], profile).why).toBe("");
+    expect(withBackedWhy("Founded by a Duke University alum.", [], profile).why).toBe("");
+  });
+  it("keeps it when a connection backs it, or when it doesn't mention them", () => {
+    expect(withBackedWhy("Minneapolis AI startup.", [office], profile).why).toBe("Minneapolis AI startup.");
+    expect(withBackedWhy("Minnesota AI startup.", [office], profile).why).toBe("Minnesota AI startup.");
+    expect(withBackedWhy("Seed-stage AI startup; not confirmed: interns.", [], profile).why).toBe("Seed-stage AI startup; not confirmed: interns.");
   });
 });

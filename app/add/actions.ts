@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 
 import { parseCsv, type CsvRow } from "@/lib/csv";
 import { normalizeCompanyUrl } from "@/lib/domain";
+import { containsWords, mentionsPerson, normalize } from "@/lib/enrich/extract";
+import type { FindConnection } from "@/lib/find-limits";
+import type { CompanyLocation } from "@/lib/locations";
 import { rescore } from "@/lib/rescore";
 import { createClient } from "@/lib/supabase/server";
 
@@ -27,7 +30,7 @@ export type AddState = {
   url?: string;
   name?: string;
   // Companies this submit added, so they can be queued for a lookup.
-  added?: { id: string; name: string }[];
+  added?: { id: string; name: string; domain?: string }[];
 };
 
 type Candidate = {
@@ -39,6 +42,8 @@ type Candidate = {
   // From the optional CSV columns: a tag like "Duke" and the page it came from.
   connection?: string;
   connectionSource?: string;
+  // From Find: office locations with their quoted sentence and page.
+  locations?: CompanyLocation[];
 };
 
 const LOOKUP_CHUNK = 100;
@@ -298,9 +303,10 @@ async function save(
           source,
           connection: c.connection ?? null,
           connection_source_url: c.connectionSource ?? null,
+          locations: c.locations ?? [],
         })),
       )
-      .select("id, name");
+      .select("id, name, domain");
     if (error) {
       const message =
         error.code === "23505"
@@ -333,7 +339,10 @@ const FIND_MAX_ADD = 20;
 
 // Adds the companies the user ticked in Find. The list comes from the
 // browser, so each site goes through the same checks as a pasted link.
-export async function addFromFind(items: { name: string; url: string }[], request: string): Promise<AddState> {
+export async function addFromFind(
+  items: { name: string; url: string; connections?: FindConnection[] }[],
+  request: string,
+): Promise<AddState> {
   const submittedAt = Date.now();
   const session = await signedInClient();
   if ("error" in session) return { submittedAt, error: session.error };
@@ -341,6 +350,7 @@ export async function addFromFind(items: { name: string; url: string }[], reques
   if (items.length > FIND_MAX_ADD) return { submittedAt, error: `Add at most ${FIND_MAX_ADD} at a time.` };
   const candidates: Candidate[] = [];
   const rejected: RowOutcome[] = [];
+  const evidence = new Map<string, FindConnection[]>();
   for (const item of items) {
     const name = typeof item?.name === "string" ? item.name.trim().replace(/\s+/g, " ").slice(0, NAME_MAX_LENGTH) : "";
     const normalized = normalizeCompanyUrl(typeof item?.url === "string" ? item.url : "");
@@ -348,10 +358,75 @@ export async function addFromFind(items: { name: string; url: string }[], reques
       rejected.push({ label: name || "(no name)", status: "skipped", message: normalized.error });
       continue;
     }
-    candidates.push({ label: name || normalized.domain, name: name || normalized.domain, url: normalized.url, domain: normalized.domain });
+    const connections = readConnections(item?.connections);
+    evidence.set(normalized.domain, connections);
+    candidates.push({
+      label: name || normalized.domain,
+      name: name || normalized.domain,
+      url: normalized.url,
+      domain: normalized.domain,
+      locations: connections
+        .filter((c) => c.kind === "office")
+        .map((c) => ({ value: c.value, quote: c.quote, source_url: c.source_url, kind: "office", from: "find" })),
+    });
   }
   const source = `find:${String(request ?? "").trim().replace(/\s+/g, " ").slice(0, FILENAME_MAX_LENGTH)}`;
-  return save(session.supabase, candidates, rejected, source, submittedAt);
+  const result = await save(session.supabase, candidates, rejected, source, submittedAt);
+
+  // A founder's school or hometown from Find becomes a person fact with its
+  // sentence and page ("stated", as founder research saves it), so the score
+  // counts it right away and lookups keep it.
+  const problems: string[] = [];
+  const scoreNow: string[] = [];
+  for (const company of result.added ?? []) {
+    const found = evidence.get(company.domain ?? "") ?? [];
+    if (found.length === 0) continue;
+    scoreNow.push(company.id);
+    const byPerson = new Map<string, Record<string, unknown>>();
+    for (const c of found) {
+      if (c.kind === "office" || !c.person) continue;
+      const row = byPerson.get(c.person) ?? { company_id: company.id, name: c.person, source_url: c.source_url, source_quote: c.quote };
+      const evidenceRow = [{ value: c.value, quote: c.quote, url: c.source_url, single: true }];
+      if (c.kind === "school" && !row.school) {
+        Object.assign(row, { school: c.value, school_source_url: c.source_url, school_quote: c.quote, school_status: "stated", school_evidence: evidenceRow });
+      }
+      if (c.kind === "hometown" && !row.hometown) {
+        Object.assign(row, { hometown: c.value, hometown_source_url: c.source_url, hometown_quote: c.quote, hometown_status: "stated", hometown_evidence: evidenceRow });
+      }
+      byPerson.set(c.person, row);
+    }
+    if (byPerson.size > 0) {
+      const { error } = await session.supabase.from("contacts").insert([...byPerson.values()]);
+      if (error) problems.push(`Added ${company.name}, but couldn't save the people Find quoted (${error.message}).`);
+    }
+  }
+  for (const id of scoreNow) {
+    const scored = await rescore(session.supabase, id);
+    if (scored.error) problems.push(`A score couldn't be updated. ${scored.error}`);
+  }
+  if (problems.length > 0) return { ...result, error: [result.error, ...problems].filter(Boolean).join(" ") };
+  return result;
+}
+
+// Find's connections come back from the browser, so each is checked again
+// for shape: a known kind, a sentence that names the value (and the person),
+// and a web page as its source.
+function readConnections(raw: unknown): FindConnection[] {
+  const out: FindConnection[] = [];
+  for (const c of Array.isArray(raw) ? raw.slice(0, 10) : []) {
+    if (typeof c !== "object" || c === null) continue;
+    const { kind, value, person, quote, source_url } = c as Record<string, unknown>;
+    if (kind !== "school" && kind !== "hometown" && kind !== "office") continue;
+    if (typeof value !== "string" || typeof quote !== "string" || typeof source_url !== "string") continue;
+    const v = value.trim().slice(0, 120);
+    const q = quote.trim().slice(0, 1000);
+    const source = httpUrl(source_url);
+    const who = kind === "office" ? null : typeof person === "string" ? person.trim().slice(0, 120) : "";
+    if (!v || !q || !source || !containsWords(normalize(q), v)) continue;
+    if (kind !== "office" && (!who || !mentionsPerson(q, who))) continue;
+    out.push({ kind, value: v, person: who, quote: q, source_url: source });
+  }
+  return out;
 }
 
 function httpUrl(raw: string): string | undefined {

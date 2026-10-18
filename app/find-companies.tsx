@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { FIND_COST_NOTE, FIND_MAX_SEARCHES, FIND_REQUEST_MAX, type FoundCompany } from "@/lib/find-limits";
+import { FIND_COST_NOTE, FIND_MAX_SEARCHES, FIND_REQUEST_MAX, type FindConnection, type FoundCompany } from "@/lib/find-limits";
 
 import { addFromFind, type AddState } from "./add/actions";
 import type { FindResponse } from "./api/find/route";
@@ -78,7 +78,12 @@ export function FindCompanies({
     onBusy?.("adding");
     let state: AddState;
     try {
-      state = await addFromFind(picked.map((c) => ({ name: c.name, url: c.url })), results.request);
+      // The quoted connections are saved with each company, so its score
+      // counts them before the lookup finishes.
+      state = await addFromFind(
+        picked.map((c) => ({ name: c.name, url: c.url, connections: c.connections })),
+        results.request,
+      );
     } catch {
       state = { error: "Couldn't reach the server, so nothing was added. Try again." };
     }
@@ -179,9 +184,22 @@ export function FindCompanies({
                       <span className="flex min-w-0 flex-col gap-1">
                         <span className="text-lg font-semibold wrap-anywhere">{c.name}</span>
                         <span className="text-base wrap-anywhere">{c.description}</span>
-                        <span className="text-base text-muted wrap-anywhere">{c.why}</span>
+                        {c.why && <span className="text-base text-muted wrap-anywhere">{c.why}</span>}
                       </span>
                     </label>
+                    {c.connections.length > 0 && (
+                      <ul className="flex flex-col gap-2 pb-2 pl-9">
+                        {c.connections.map((k, i) => (
+                          <li key={i} className="flex flex-col gap-1 border-l-2 border-accent pl-3 text-base">
+                            <span className="font-semibold">{connectionLabel(k)}</span>
+                            <q className="text-muted wrap-anywhere">{k.quote}</q>
+                            <a href={k.source_url} target="_blank" rel="noopener noreferrer" className="flex min-h-12 w-fit items-center text-muted underline underline-offset-4 wrap-anywhere">
+                              Source: {hostOf(k.source_url)}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     {/* Links sit outside the label so tapping them doesn't untick the row. */}
                     <p className="flex flex-wrap gap-x-4 pb-3 pl-9 text-base">
                       <a href={c.url} target="_blank" rel="noopener noreferrer" className="flex min-h-12 items-center underline underline-offset-4 wrap-anywhere">
@@ -220,6 +238,11 @@ export function FindCompanies({
       )}
     </section>
   );
+}
+
+function connectionLabel(k: FindConnection) {
+  if (k.kind === "office") return `Office in ${k.value}`;
+  return k.kind === "school" ? `${k.person} went to ${k.value}` : `${k.person} is from ${k.value}`;
 }
 
 function hostOf(url: string) {

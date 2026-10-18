@@ -101,7 +101,7 @@ async function find(supabase: Awaited<ReturnType<typeof createClient>>, apiKey: 
     const { checked, leftOut } = await checkCandidates(searched.candidates, searched.resultUrls, existing, Math.min(20_000, deadline - Date.now() - 15_000));
     const verifyTime = Math.min(25_000, deadline - Date.now());
     if (checked.length > 0 && verifyTime < 8_000) return fail(504, "Couldn't find companies. The search ran out of time. Try a narrower request.");
-    const verified = await verifyCompanies(apiKey, request, profile as FindProfile | null, checked, verifyTime);
+    const verified = await verifyCompanies(apiKey, request, profile as FindProfile | null, checked, verifyTime, searched.quotes);
     return Response.json({
       ok: true,
       companies: verified.companies,
