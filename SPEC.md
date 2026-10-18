@@ -43,14 +43,18 @@ Every score shows its reasons ("Founder went to Duke: found on /about page") wit
 - **The app never sends anything.** It produces a draft; I read it and send it.
 - Built (`feature/drafts`): "Draft an email" on the company page. Pick a recipient (a saved person, or the team) and what to lead with (same school, same hometown, an open role, what they build; only the ones a fact supports). Claude Opus 5.5 writes from a numbered list of facts: company facts with sources, the person's counted facts, and profile facts. Every draft is checked before it's shown (under 120 words, no stock phrases, no placeholders, no number that isn't in the facts, one named company fact), with one retry. The draft is saved on the company's outreach row and the status becomes "drafted". It can be edited (live word count and stock-phrase warning), copied, or opened in Gmail's compose window, with the address filled in only if the user typed one.
 
-## Discover (Saturday morning, before drafts)
+## Find companies (`feature/find`; replaces Discover, which is cut)
 A way to find new targets without leaving the app.
-- Pull the current Hacker News "Who is hiring?" thread through the official APIs only: the Algolia HN Search API to find this month's thread (posted by `whoishiring`), and the HN Firebase API or Algolia items endpoint for its top-level comments. No HTML scraping.
-- Send the posts to Claude with my profile (interests: tech, quant; target roles: internships). Claude picks the posts that match and, for each, pulls out only what the post states: company, a short description, location, roles, website. Anything not in the post stays empty. Post text is untrusted data, the same as company pages in enrichment: instructions inside it are ignored.
-- Show the matches as a checklist: company, short description, location, roles, website, and a link to the original HN post. Every match starts ticked; I can untick any row. An "Add all" button adds the ticked ones (its label shows how many).
-- **Nothing is added without my click** on that button. Adding goes through the same path as `/add`: dedupe on domain (already-saved ones are reported, not added twice), `source` = `hn:<thread id>`. A match without a website can't be added and says so.
-- Companies just added are queued for enrichment automatically, in the same queue as "Look up all" on the list page (one at a time, progress shown, errors per company), and scored as each lookup finishes.
-- Errors (API down, thread not found, bad model output) are shown on the page, like everywhere else.
+- A **Find companies** box on `/`: type a request in plain English ("early-stage quant firms in NYC hiring interns"). The profile (target roles, interests, major, class year, school, hometown) is sent with it.
+- `/api/find`: Claude (Haiku) with the web search tool, at most 10 searches per request (about 10 to 20 cents, shown under the box), LinkedIn and people-data sites blocked. It proposes up to 12 companies: name, website, why, and the search result it was found in.
+- **Nothing invented.** A company is shown only when all of these hold:
+  - its source is a URL the search tool actually returned;
+  - its website is a company site (not a directory, job board or LinkedIn) and isn't already in the list (dedupe on domain);
+  - its home page responds through the same safe fetch and robots.txt rules as lookups (a site that moved to a new domain is checked there) and names the company;
+  - a second Haiku call, reading that page, confirms it describes the company and doesn't contradict the request. The one-line description and "why it matches" come from that page and the search result. Requirements the page doesn't confirm (like hiring interns) are said to be unconfirmed.
+- Results show as a checklist (all ticked): company, website, one-line description, why it matches, and "Found on …" linking to the source. "Add all N", or untick rows and "Add N selected". Everything left out is listed with the reason.
+- **Nothing is added without a click.** Adding goes through the same checks as `/add` (`source` = `find:<request>`). The added companies queue straight into Look up all (or join a run in progress) and are scored as each lookup finishes.
+- **One Find at a time per user**, claimed in the database (`find_locks`, `claim_find_slot()`; a claim expires after 3 minutes). A second one gets a clear error. Every other error (no results, API, timeouts, a cut-off answer) is shown in the box.
 
 ## Data (Postgres on Supabase, RLS on every table)
 - `profiles`: user_id, school, hometown, interests, role_targets, writing_samples
@@ -86,7 +90,7 @@ Next.js on Vercel, Supabase (auth + Postgres), one server route for enrichment a
 - **Tue night / Wed**: repo, Next.js, Supabase tables + RLS, auth, deploy to Vercel. Empty app live on day one.
 - **Thu**: add company + enrichment + list page
 - **Fri**: scoring, filters, profile page, Look up all
-- **Sat**, in order, one branch each: people (founder research, add person, CSV connection), fit (About me, resume, role fit), Discover (HN "Who is hiring?" matches, select and add, auto-queued for lookup), drafts, status tracking
+- **Sat**, in order, one branch each: people (founder research, add person, CSV connection), fit (About me, resume, role fit), drafts, status tracking; then Find companies (plain-English request, web search, checklist, auto-queued for lookup), which replaced Discover
 - **Sun**: second-user test for RLS, phone pass, security pass, fresh-session review against this spec
 - **Mon**: record the <3 min video, submit
 

@@ -326,6 +326,38 @@ Known limits:
   - Not done: there's no cooldown on Check fit or the upload; repeat clicks only spend the user's own key budget.
 - **Note:** the dev server running since Oct 17 kept old `lib/scoring.ts` in its server bundle after the branch switch; restarting it fixed it.
 
+## Finished (branch `feature/find`, 2026-10-18; replaces Discover)
+- **Find companies** box on `/`, posting to `/api/find` (maxDuration 120, with one 108 s budget across the steps):
+  1. **Search** (Haiku, effort medium, up to 10 web searches, LinkedIn and people-data sites blocked, `max_tokens` 12,000): proposes up to 12 companies as JSON in `<companies>` tags.
+  2. **Code checks:**
+     - the source must be a URL the search tool returned;
+     - the website must normalize to a company site and not be in the list;
+     - the home page is read by `readHomePage` (safe fetch and robots.txt; a site that moved to a new domain is checked there once) within a 20 s cap, and must name the company;
+     - a website the model supplied (no search result came from it) must state the full name.
+  3. **Verify** (Haiku, structured output): confirms the page describes the company and doesn't contradict the request, and writes the description and "why" from the page.
+- **Tuning, from live runs:**
+  - at effort low and 6,000 output tokens it stopped after a few searches with 2 to 4 companies;
+  - requiring websites that appear in the results cut 10 candidates to 4;
+  - after these changes, "early-stage quant firms in NYC hiring interns" gave 8 confirmed firms, plus 4 left out with reasons, in 48 s.
+- **Lock:** `find_locks` has RLS on and no policies. Only `claim_find_slot()` (returns a token) and `release_find_slot(token)` touch it; they are security definer, scoped to `auth.uid()`. The token never leaves the server, so a user can't clear their own lock and run Finds in parallel. A claim expires after 3 minutes, and a failed release is shown with the results.
+- **Adding:** `addFromFind` re-validates and goes through the same `save()` as `/add`, which now also returns the added ids. Those are queued into Look up all with a window event (they join a run in progress, or start their own after a stopped one).
+- **Migrations:** `20261018155621_find_locks.sql` and `20261018160918_find_locks_server_only.sql`.
+- **Tested live** (throwaway users, deleted):
+  - a too-short request was refused;
+  - a second Find during the first got the clear 429 error;
+  - direct table reads were refused, and a made-up release token freed nothing;
+  - a Find right after the first one went through;
+  - Add added the companies and returned ids, and adding again was reported as duplicates.
+- **Fresh-context review** found 8 issues, all fixed:
+  - a guessed website could attach a different company with a similar name;
+  - users could bypass the lock;
+  - the time budget had no shared deadline;
+  - a failed release was hidden;
+  - errors became generic text;
+  - companies queued while a run was stopping were dropped;
+  - source URL matching was too strict (scheme, www);
+  - SPEC was missing the Find section.
+- **Note:** 120 s needs Vercel Fluid compute; the preview build confirms whether the project allows it.
 ## Finished (branch `fix/sign-out`, 2026-10-18)
 - **Sign out** moved from the bottom of `/` to the bottom of `/profile`, below Save, under "Signed in as <email>". It's the only Sign out. It goes to `/login`, and signed-out pages redirect there.
 - **One `TopBar`** (`app/top-bar.tsx`) on every signed-in page (`/`, `/add`, `/company/[id]`, its not-found page, `/profile`): "Back to your list" on the left (except on `/`), "Profile" in the top-right corner (marked current on `/profile`). The home page's top padding now matches the other pages, so Profile sits in the same spot everywhere.
