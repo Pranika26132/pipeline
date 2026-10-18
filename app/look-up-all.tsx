@@ -137,10 +137,10 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
       {confirming && (
         <div className="flex flex-col gap-3 rounded-lg border-2 border-foreground p-4">
           <p className="text-base">
-            This reads the website of {label} one at a time, asks Claude about each, and searches the web (at most 3
-            searches per company) for where the people found went to school and are from. That uses your API credit:
-            roughly 2 to 4 cents a company, up to about ${(pending.length * 0.04).toFixed(2)} in all. Keep this page open
-            while it runs.
+            This reads the website of {label} one at a time, asks Claude about each, and searches the web for its
+            founders (1 search, when the site names none) and for where the people found went to school and are from (up
+            to 3 more). That uses your API credit: roughly 2 to 5 cents a company, up to about $
+            {(pending.length * 0.05).toFixed(2)} in all. Keep this page open while it runs.
           </p>
           <div className="grid grid-cols-2 gap-3">
             <button

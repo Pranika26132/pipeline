@@ -237,7 +237,9 @@ Known limits:
     - Research took 13–19 s; no timeouts.
     - Sarthak Dhawan's school was not saved in these runs. The Duke sources the searches returned were first-person ("I got into Duke University" in an interview; his own blog post on turbo.ai) or RocketReach (blocked). A first-person quote doesn't name him, so it isn't used.
     - One earlier run found a sentence about him alone on Starter Story and scored Duke +3. Results depend on what each search returns.
-- **Next on the queue:** `feature/fit`. About me (graduation year, degree and major, resume pasted or uploaded as a PDF up to 5 MB through Claude's PDF input; text only is stored), and role fit judged by Claude with "unclear" when unsure.
+- **Search budget split:** 1 search to find founders (only when the site names none; founders are read from the quotes by `founderNames`, with no extra model call), then up to 3 to research people. At most 4 per company, about 2 to 5 cents. Timeouts are 15 s for the founder search, 30 s for research and 12 s for the picker, which keeps the route under 60 s. Turbo AI retest: 4 searches in 20 s. Sarthak Dhawan and Rudy Arora were both saved from Yahoo's founder sentence, and Rudy → Northwestern was stated. Sarthak's school wasn't found in this run (accepted by the user).
+- Known: the same person under two names (e.g. "Rudransh Arora" and "Rudy Arora") is saved twice; the app can't tell they're one person.
+- **Order for the rest** (user, 2026-10-17): drafts, then status, then fit (resume PDF, graduation year, role fit, flagging internships whose dates have passed like "Summer 2026"), then Discover only if time remains. About me (graduation year, degree and major, resume pasted or uploaded as a PDF up to 5 MB through Claude's PDF input; text only is stored), and role fit judged by Claude with "unclear" when unsure.
 
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).

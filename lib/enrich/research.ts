@@ -11,7 +11,9 @@ import { BadModelOutputError, containsWords, normalize } from "./extract";
 // wording, and are checked here before anything is saved.
 
 const MODEL = "claude-haiku-5-5";
-// The cap the user chose: at most 3 searches per company.
+// The caps the user chose: 1 search to find founders, then up to 3 to
+// research people (at most 4 per company).
+export const FOUNDER_SEARCHES = 1;
 export const MAX_SEARCHES = 3;
 // Never searched or cited: LinkedIn (CLAUDE.md) and people-data sites built
 // largely from LinkedIn profiles, whose terms forbid this kind of use.
@@ -90,8 +92,10 @@ const PICK_SCHEMA = {
 // `title`: the page's title, as returned with the citation.
 export type Quote = { text: string; url: string; title?: string | null };
 
-// `discover`: the company's own pages named no founder or CEO, so search for
-// who founded or leads it first (within the same 3-search cap).
+// `discover`: the company's own pages named no founder or CEO. One search
+// looks for who founded or leads it; then up to 3 more research the people
+// (those listed plus any founders found), so finding founders never uses up
+// the budget for their schools and hometowns. At most 4 searches.
 export async function research(
   apiKey: string,
   company: Company,
@@ -102,41 +106,79 @@ export async function research(
 ): Promise<ResearchResult> {
   const known = people.slice(0, MAX_PEOPLE);
   if (known.length === 0 && !discover) return { leaders: [], findings: [], searches: 0, notes: [] };
-  // 40 s here plus 15 s for the picker keeps the route under its 60 s limit.
-  const client = new Anthropic({ apiKey, timeout: 40_000, maxRetries: 0 });
+  const client = new Anthropic({ apiKey, maxRetries: 0 });
   const notes: string[] = [];
+  const header = `Company: ${clean(company.name)} (website: ${company.domain})\n`;
+  let searches = 0;
 
-  const list = known.map((p) => `- ${clean(p.name)}${p.title ? ` (${clean(p.title)})` : ""}`).join("\n");
-  const ask = discover
-    ? `The company's website doesn't name its founders. First find who founded or leads this company (founders, co-founders, CEO), using only pages about the company at ${company.domain}. Then, for each of them${known.length ? " and each person listed" : ""}, what school did they attend and where are they from? Cite pages that state it.`
-    : "For each person, what school did they attend and where are they from? Search for each person by name, and cite a sentence about that person alone where you can.";
-  const response = await client.messages.create({
-    model: MODEL,
-    // Short answers: the citations are what's used, not the prose. A long
-    // answer after several per-name searches is what ran past the timeout.
-    max_tokens: 2500,
-    output_config: { effort: "low" },
-    system: SEARCH_SYSTEM,
-    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: MAX_SEARCHES, blocked_domains: BLOCKED_DOMAINS }],
-    messages: [
-      {
-        role: "user",
-        content: `Company: ${clean(company.name)} (website: ${company.domain})\n${known.length ? `People:\n${list}\n` : ""}\n${ask}`,
-      },
-    ],
+  // Step 1: who founded or leads it. Founders are read from the quotes by
+  // the code (founderNames), so no second model call is needed here.
+  let leaders: Leader[] = [];
+  if (discover) {
+    const found = await search(client, {
+      content: `${header}\nThe company's website doesn't name its founders. Who founded or leads this company (founders, co-founders, CEO)? Use only pages about the company at ${company.domain}. Cite the sentence that names them.`,
+      maxUses: FOUNDER_SEARCHES,
+      maxTokens: 1000,
+      timeout: 15_000,
+    });
+    searches += found.searches;
+    notes.push(...found.notes);
+    leaders = acceptLeaders(founderNames(found.quotes, []), found.quotes, company, known);
+  }
+
+  const targets = [
+    ...known,
+    ...leaders.map((l) => ({ key: l.key, name: l.name, title: l.title, needSchool: true, needHometown: true })),
+  ];
+  if (targets.length === 0) return { leaders, findings: [], searches, notes };
+
+  // Step 2: each person's school and hometown.
+  const list = targets.map((p) => `- ${clean(p.name)}${p.title ? ` (${clean(p.title)})` : ""}`).join("\n");
+  const facts = await search(client, {
+    content: `${header}People:\n${list}\n\nFor each person, what school did they attend and where are they from? Search for each person by name, and cite a sentence about that person alone where you can.`,
+    maxUses: MAX_SEARCHES,
+    maxTokens: 2500,
+    timeout: 30_000,
   });
+  searches += facts.searches;
+  notes.push(...facts.notes);
+  if (facts.quotes.length === 0) return { leaders, findings: [], searches, notes };
+
+  const picked = await pick(client, company, targets, facts.quotes, false);
+  // Everyone the answer mentions, so a sentence naming any of them alongside
+  // the person isn't counted as being about that person alone.
+  const otherNames = [...otherPeople, ...picked.leaders.map((l) => l.name), ...picked.facts.map((f) => f.person)];
+  return { leaders, findings: acceptFacts(picked.facts, targets, facts.quotes, otherNames), searches, notes };
+}
+
+// One web search request: returns the quotes the search tool copied from
+// pages (citations), how many searches ran, and any search errors.
+async function search(
+  client: Anthropic,
+  { content, maxUses, maxTokens, timeout }: { content: string; maxUses: number; maxTokens: number; timeout: number },
+): Promise<{ quotes: Quote[]; searches: number; notes: string[] }> {
+  const response = await client.messages.create(
+    {
+      model: MODEL,
+      // Short answers: the citations are what's used, not the prose.
+      max_tokens: maxTokens,
+      output_config: { effort: "low" },
+      system: SEARCH_SYSTEM,
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: maxUses, blocked_domains: BLOCKED_DOMAINS }],
+      messages: [{ role: "user", content }],
+    },
+    { timeout },
+  );
   if (response.stop_reason === "refusal") throw new BadModelOutputError("The model declined to research these people.");
   // A cut-off answer would drop citations silently; say so instead.
   if (response.stop_reason === "max_tokens" || response.stop_reason === "pause_turn") {
     throw new BadModelOutputError("The research answer was cut off before it finished. Try Research founders again.");
   }
-  const searches = response.usage.server_tool_use?.web_search_requests ?? 0;
-
-  // Quotes copied from pages by the search tool, attached to the answer.
+  const notes: string[] = [];
   const quotes: Quote[] = [];
   const seen = new Set<string>();
   for (const block of response.content) {
-    // Reaching the 3-search cap is expected, not a failure.
+    // Reaching the search cap is expected, not a failure.
     if (block.type === "web_search_tool_result" && !Array.isArray(block.content) && block.content.error_code !== "max_uses_exceeded") {
       notes.push(`A web search failed (${block.content.error_code}).`);
     }
@@ -149,20 +191,7 @@ export async function research(
       quotes.push({ text: c.cited_text.slice(0, 1000), url: c.url, title: c.title?.slice(0, 300) ?? null });
     }
   }
-  if (quotes.length === 0) return { leaders: [], findings: [], searches, notes };
-
-  const picked = await pick(client, company, known, quotes, discover);
-  // Every founder a quote names counts, not only those the picker listed:
-  // "Founded by Sarthak Dhawan and Rudy Arora" gives both.
-  const leaders = discover ? acceptLeaders([...picked.leaders, ...founderNames(quotes, picked.leaders)], quotes, company, known) : [];
-  const targets = [
-    ...known,
-    ...leaders.map((l) => ({ key: l.key, name: l.name, title: l.title, needSchool: true, needHometown: true })),
-  ];
-  // Everyone the answer mentions, so a sentence naming any of them alongside
-  // the person isn't counted as being about that person alone.
-  const otherNames = [...otherPeople, ...picked.leaders.map((l) => l.name), ...picked.facts.map((f) => f.person)];
-  return { leaders, findings: acceptFacts(picked.facts, targets, quotes, otherNames), searches, notes };
+  return { quotes, searches: response.usage.server_tool_use?.web_search_requests ?? 0, notes };
 }
 
 export type PickedLeader = { name: string; role: string; quote: number };
@@ -399,7 +428,8 @@ async function pick(client: Anthropic, company: Company, people: ResearchPerson[
       output_config: { effort: "low", format: { type: "json_schema", schema: PICK_SCHEMA } },
       messages: [{ role: "user", content }],
     },
-    { timeout: 15_000 },
+    // 15 s founders + 30 s research + 12 s here stays under the 60 s limit.
+    { timeout: 12_000 },
   );
   if (response.stop_reason === "refusal") throw new BadModelOutputError("The model declined to read the search results.");
   if (response.stop_reason === "max_tokens") throw new BadModelOutputError("The model's answer was cut off before it finished.");
