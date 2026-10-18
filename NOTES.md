@@ -424,4 +424,3 @@ Known limits:
 ## Open questions
 - `npm audit`: 5 high (`braces` through `eslint-config-next`, dev only). The suggested fix downgrades to eslint-config-next 14, so it is not applied.
 - Leaked Password Protection: Requires a paid Supabase plan; left off on the free tier.
-- No column for score weights yet. Add with the scoring step.
