@@ -30,6 +30,7 @@ export type Level = (typeof LEVELS)[number]["value"];
 export const WEIGHTS = [
   { key: "weight_school", label: "Founder or team went to my school", points: { none: 0, matters: 2, a_lot: 3 }, fallback: "a_lot" },
   { key: "weight_hometown", label: "Founder or team is from my hometown", points: { none: 0, matters: 2, a_lot: 3 }, fallback: "matters" },
+  { key: "weight_region", label: "Office or roles near my hometown or region", points: { none: 0, matters: 1, a_lot: 2 }, fallback: "matters" },
   { key: "weight_open_role", label: "Hiring for a role I want", points: { none: 0, matters: 2, a_lot: 3 }, fallback: "matters" },
   { key: "weight_early_stage", label: "Small, early-stage company", points: { none: 0, matters: 1, a_lot: 2 }, fallback: "matters" },
 ] as const satisfies readonly { key: string; label: string; points: Record<Level, number>; fallback: Level }[];

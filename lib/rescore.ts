@@ -1,3 +1,4 @@
+import { readLocations } from "./locations";
 import { WEIGHTS } from "./profile";
 import { scoreCompany, type ScoreInput } from "./scoring";
 import type { createClient } from "./supabase/server";
@@ -38,7 +39,7 @@ export async function rescore(supabase: Supabase, companyId?: string): Promise<{
 async function rescoreOnce(supabase: Supabase, companyId?: string): Promise<{ error: string } | { skipped: number }> {
   const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
-    .select("school, hometown, role_targets, degree, major, grad_year, resume, weight_school, weight_hometown, weight_open_role, weight_early_stage, updated_at")
+    .select("school, hometown, role_targets, degree, major, grad_year, resume, weight_school, weight_hometown, weight_open_role, weight_early_stage, weight_region, updated_at")
     .maybeSingle();
   if (profileError) return { error: `Couldn't load your profile (${profileError.message}).` };
   const profile: ScoreInput["profile"] = profileRow ?? DEFAULT_PROFILE;
@@ -47,7 +48,7 @@ async function rescoreOnce(supabase: Supabase, companyId?: string): Promise<{ er
   const companies = await readAll<ScoreRow>((from, to) => {
     let q = supabase
       .from("companies")
-      .select("id, enriched_at, facts_version, stage, size, open_roles, field_sources, connection, connection_source_url, role_fit")
+      .select("id, enriched_at, facts_version, stage, size, open_roles, field_sources, connection, connection_source_url, role_fit, locations")
       .order("id");
     if (companyId) q = q.eq("id", companyId);
     return q.range(from, to);
@@ -78,7 +79,10 @@ async function rescoreOnce(supabase: Supabase, companyId?: string): Promise<{ er
   // nothing to score yet.
   const scores = companies.rows.map((company) => {
     const versions = { id: company.id, facts_version: company.facts_version, profile_version: profileVersion };
-    if (!company.enriched_at) return { ...versions, score: null, reasons: [] };
+    // A company not looked up yet is scored only when it already has facts
+    // with sources (people or places Find quoted, an imported tag).
+    const hasFacts = (byCompany.get(company.id)?.length ?? 0) > 0 || readLocations(company.locations).length > 0 || !!company.connection;
+    if (!company.enriched_at && !hasFacts) return { ...versions, score: null, reasons: [] };
     const { score, reasons } = scoreCompany({ company, contacts: byCompany.get(company.id) ?? [], profile });
     return { ...versions, score, reasons };
   });

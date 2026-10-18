@@ -4,9 +4,10 @@
 // profile. Nothing is guessed; a factor without a stated fact doesn't count.
 
 import { currentFits, fitFor, fitKey, isSeniorTitle } from "./fit";
+import { readLocations } from "./locations";
 import { roleTiming } from "./roles";
 
-export type Factor = "school" | "hometown" | "open_role" | "early_stage";
+export type Factor = "school" | "hometown" | "region" | "open_role" | "early_stage";
 
 export type Reason = {
   factor: Factor;
@@ -28,6 +29,8 @@ export type ScoreInput = {
     connection_source_url?: string | null;
     // Claude's per-role verdicts (lib/fit.ts), with the profile key they were judged against.
     role_fit?: unknown;
+    // Offices, HQ and role locations with sources (lib/locations.ts).
+    locations?: unknown;
   };
   contacts: {
     name: string;
@@ -53,6 +56,8 @@ export type ScoreInput = {
     weight_hometown: number;
     weight_open_role: number;
     weight_early_stage: number;
+    // Missing for profiles saved before the factor existed: the default.
+    weight_region?: number;
     // Role fit is judged against these too (lib/fit.ts fitKey).
     degree?: string | null;
     major?: string | null;
@@ -68,6 +73,7 @@ export type ScoreResult = { score: number; reasons: Reason[] };
 export const FACTOR_LABELS: Record<Factor, string> = {
   school: "Alumni",
   hometown: "Hometown",
+  region: "Nearby",
   open_role: "Role open",
   early_stage: "Early stage",
 };
@@ -106,6 +112,10 @@ export function scoreCompany({ company, contacts, profile, today = new Date() }:
         ? connectionReason()
         : null;
     add("hometown", profile.weight_hometown, found);
+  }
+
+  if (profile.hometown?.trim()) {
+    add("region", profile.weight_region ?? 1, regionReason(company.locations, profile.hometown));
   }
 
   add("open_role", profile.weight_open_role, roleReason(company, profile, today));
@@ -276,6 +286,30 @@ export function placesMatch(profilePlace: string, personPlace: string): boolean 
   const theirs = placeParts(personPlace, true);
   if (theirs.length < 2 || mine[0] !== theirs[0]) return false;
   return mine.slice(1).some((p) => theirs.slice(1).includes(p));
+}
+
+// The words a place goes by, for spotting it in text: "Minneapolis, MN" ->
+// ["minneapolis", "minnesota", "mn"].
+export function placeTerms(place: string): string[] {
+  return [...new Set([...placeParts(place, true), ...placeParts(place, false)])].filter((t) => t.length >= 2);
+}
+
+// "Nearby": an office, HQ or role location in the profile's place, or in the
+// same state as the profile's city ("Minneapolis, MN" counts for "St. Paul,
+// Minnesota"). A location needs a source page.
+export function regionsMatch(profilePlace: string, place: string): boolean {
+  if (placesMatch(profilePlace, place)) return true;
+  const mine = placeParts(profilePlace, true);
+  if (mine.length < 2) return false;
+  const state = mine[mine.length - 1];
+  // Ambiguous codes in the company's place ("Toronto, CA") aren't read as states.
+  return placeParts(place, false).some((p) => p === state);
+}
+
+function regionReason(locations: unknown, home: string) {
+  const match = readLocations(locations).find((l) => isHttpUrl(l.source_url) && regionsMatch(home, l.value));
+  if (!match) return null;
+  return { text: match.kind === "office" ? `Office in ${match.value}` : `Role located in ${match.value}`, source_url: match.source_url };
 }
 
 // Roles -------------------------------------------------------------------------

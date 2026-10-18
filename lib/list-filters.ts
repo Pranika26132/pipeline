@@ -6,6 +6,7 @@ import type { Factor } from "./scoring";
 export const FACTOR_CHIPS = [
   { slug: "alumni", factor: "school", label: "Alumni" },
   { slug: "hometown", factor: "hometown", label: "Hometown" },
+  { slug: "nearby", factor: "region", label: "Nearby" },
   { slug: "role", factor: "open_role", label: "Role open" },
 ] as const satisfies readonly { slug: string; factor: Factor; label: string }[];
 

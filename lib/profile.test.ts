@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { levelFor, parseGradYear, WEIGHTS } from "./profile";
 
 describe("score weight choices", () => {
-  it("default choices give SPEC.md's points: school 3, hometown 2, open role 2, early stage 1", () => {
+  it("default choices give SPEC.md's points: school 3, hometown 2, nearby 1, open role 2, early stage 1", () => {
     const points = Object.fromEntries(WEIGHTS.map((w) => [w.key, w.points[w.fallback]]));
-    expect(points).toEqual({ weight_school: 3, weight_hometown: 2, weight_open_role: 2, weight_early_stage: 1 });
+    expect(points).toEqual({ weight_school: 3, weight_hometown: 2, weight_region: 1, weight_open_role: 2, weight_early_stage: 1 });
   });
 
   it("\"Doesn't matter\" is 0 for every factor", () => {
