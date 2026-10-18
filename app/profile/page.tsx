@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { levelFor, LIMITS, ROLE_PRESETS, WEIGHTS, type ProfileValues, type WeightKey } from "@/lib/profile";
 import { createClient } from "@/lib/supabase/server";
 
+import { EmailAddress } from "../email-address";
+import { SignOutButton } from "../sign-out-button";
+import { TopBar } from "../top-bar";
 import { ProfileForm } from "./profile-form";
 
 export const metadata: Metadata = {
@@ -15,12 +17,7 @@ export const metadata: Metadata = {
 export default function ProfilePage() {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pt-6 sm:pt-12">
-      <Link
-        href="/"
-        className="-ml-2 flex min-h-12 w-fit items-center px-2 text-base font-medium underline underline-offset-4"
-      >
-        Back to your list
-      </Link>
+      <TopBar onProfile />
       <h1 className="mt-6 text-4xl font-bold tracking-[-0.04em]">Your profile</h1>
       <p className="mt-3 text-lg text-muted">
         Pipeline ranks companies by these details and writes drafts from your samples. Only you can see them.
@@ -67,7 +64,17 @@ async function Profile() {
     ) as Record<WeightKey, string>,
   };
 
-  return <ProfileForm initial={initial} />;
+  return (
+    <>
+      <ProfileForm initial={initial} />
+      <section aria-label="Account" className="mt-12 flex flex-col gap-4 border-t-2 border-foreground pt-6 pb-10">
+        <p className="text-base text-muted">
+          Signed in as <EmailAddress address={auth.claims.email ?? ""} />
+        </p>
+        <SignOutButton />
+      </section>
+    </>
+  );
 }
 
 function Alert({ children }: { children: React.ReactNode }) {

@@ -12,6 +12,7 @@ import type { Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
 import { LocalDate } from "../../local-date";
+import { TopBar } from "../../top-bar";
 import { AddPersonForm } from "./add-person";
 import { CheckFitButton } from "./check-fit-button";
 import { RenameForm } from "./rename-form";
@@ -28,12 +29,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export default function CompanyPage({ params }: PageProps<"/company/[id]">) {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pt-6 pb-16 sm:pt-12">
-      <Link
-        href="/"
-        className="-ml-2 flex min-h-12 w-fit items-center px-2 text-base font-medium underline underline-offset-4"
-      >
-        Back to your list
-      </Link>
+      <TopBar />
       <Suspense fallback={<p className="mt-6 text-lg text-muted">Loading company…</p>}>
         {params.then(({ id }) => (
           <Company id={id} />
