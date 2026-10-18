@@ -135,6 +135,65 @@ describe("scoreCompany", () => {
   });
 });
 
+describe("sources for people facts", () => {
+  const RESEARCH = "https://fortune.com/story";
+
+  it("uses the page that stated the school, not the team page", () => {
+    const result = scoreCompany({
+      profile,
+      company: emptyCompany,
+      contacts: [person({ school: "Duke University", school_source_url: RESEARCH })],
+    });
+    expect(result.reasons[0]).toMatchObject({ factor: "school", source_url: RESEARCH });
+  });
+
+  it("scores a researched fact only when it's stated, not shared or conflicting", () => {
+    const withStatus = (school_status: string) =>
+      scoreCompany({
+        profile,
+        company: emptyCompany,
+        contacts: [person({ school: "Duke University", school_source_url: RESEARCH, school_status })],
+      }).score;
+    expect(withStatus("stated")).toBe(3);
+    expect(withStatus("shared")).toBe(0);
+    expect(withStatus("conflicting")).toBe(0);
+  });
+
+  it("counts a fact the user added, with no link", () => {
+    const result = scoreCompany({
+      profile,
+      company: emptyCompany,
+      contacts: [person({ school: "Duke", source_url: null, added_by_user: true })],
+    });
+    expect(result.reasons[0]).toMatchObject({ factor: "school", points: 3, source_url: null });
+  });
+
+  it("counts an imported list's connection when no person matches", () => {
+    const result = scoreCompany({
+      profile,
+      company: { ...emptyCompany, connection: "Duke", connection_source_url: "https://duke.edu/startups" },
+      contacts: [],
+    });
+    expect(result.reasons).toEqual([
+      { factor: "school", points: 3, text: "Tagged Duke in your imported list", source_url: "https://duke.edu/startups" },
+    ]);
+    const place = scoreCompany({ profile, company: { ...emptyCompany, connection: "Raleigh, NC" }, contacts: [] });
+    expect(place.reasons).toEqual([
+      { factor: "hometown", points: 2, text: "Tagged Raleigh, NC in your imported list", source_url: null },
+    ]);
+  });
+
+  it("prefers a person over the connection, and never counts both for one factor", () => {
+    const result = scoreCompany({
+      profile,
+      company: { ...emptyCompany, connection: "Duke" },
+      contacts: [person({ school: "Duke" })],
+    });
+    expect(result.score).toBe(3);
+    expect(result.reasons[0].text).toBe("Jane Doe (CEO) went to Duke");
+  });
+});
+
 describe("schoolsMatch", () => {
   it.each([
     ["Duke", "Duke University"],

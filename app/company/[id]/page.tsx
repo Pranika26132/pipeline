@@ -8,7 +8,8 @@ import type { Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
 import { LocalDate } from "../../local-date";
-import { EnrichButton } from "./enrich-button";
+import { AddPersonForm } from "./add-person";
+import { EnrichButton, ResearchButton } from "./enrich-button";
 
 export const metadata: Metadata = {
   title: "Company · Pipeline",
@@ -45,12 +46,14 @@ async function Company({ id }: { id: string }) {
   const [companyResult, contactsResult] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons")
+      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons, connection, connection_source_url")
       .eq("id", id)
       .maybeSingle(),
     supabase
       .from("contacts")
-      .select("id, name, title, school, hometown, source_url, email")
+      .select(
+        "id, name, title, school, hometown, source_url, source_quote, email, school_source_url, school_quote, hometown_source_url, hometown_quote, added_by_user, school_status, hometown_status, school_evidence, hometown_evidence",
+      )
       .eq("company_id", id)
       .order("name"),
   ]);
@@ -119,6 +122,7 @@ async function Company({ id }: { id: string }) {
         score={company.score}
         reasons={(Array.isArray(company.score_reasons) ? company.score_reasons : []) as Reason[]}
         lookedUp={!!company.enriched_at}
+        domain={company.domain}
       />
 
       <section aria-labelledby="about" className="mt-10 border-t-2 border-foreground pt-6">
@@ -150,6 +154,12 @@ async function Company({ id }: { id: string }) {
             )}
           </Fact>
           <Fact term="Added from">{describeSource(company.source)}</Fact>
+          {company.connection && (
+            <Fact term="Tagged">
+              {company.connection} <span className="text-muted">(from your list)</span>{" "}
+              <SourceLink url={company.connection_source_url} />
+            </Fact>
+          )}
           <Fact term="Added on">
             <LocalDate iso={company.created_at} />
           </Fact>
@@ -192,15 +202,27 @@ async function Company({ id }: { id: string }) {
             {contactsResult.data.map((p) => {
               const source = safeHref(p.source_url);
               return (
-                <li key={p.id} className="flex flex-col gap-1 py-4">
-                  <p className="text-lg font-semibold wrap-anywhere">{p.name}</p>
-                  {p.title && <p className="text-base">{p.title}</p>}
-                  {(p.school || p.hometown) && (
-                    <p className="text-base text-muted">
-                      {[p.school, p.hometown].filter(Boolean).join(", ")}
-                    </p>
+                <li key={p.id} className="flex flex-col gap-2 py-4">
+                  <div>
+                    <p className="text-lg font-semibold wrap-anywhere">{p.name}</p>
+                    {p.title && <p className="text-base">{p.title}</p>}
+                  </div>
+                  {p.source_quote && (
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm text-muted">
+                        Named as {p.title?.toLowerCase() ?? "a leader"} <FoundOn url={p.source_url} domain={company.domain} />
+                      </p>
+                      <blockquote className="border-l-2 border-rule pl-3 text-sm leading-relaxed text-muted wrap-anywhere">
+                        “{p.source_quote.trim()}”
+                      </blockquote>
+                    </div>
                   )}
+                  <PersonFact label="School" value={p.school} url={p.school_source_url ?? p.source_url} quote={p.school_quote} byUser={p.added_by_user} domain={company.domain} status={p.school_status} evidence={p.school_evidence} />
+                  <PersonFact label="From" value={p.hometown} url={p.hometown_source_url ?? p.source_url} quote={p.hometown_quote} byUser={p.added_by_user} domain={company.domain} status={p.hometown_status} evidence={p.hometown_evidence} />
                   {p.email && <p className="text-base wrap-anywhere">{p.email}</p>}
+                  {p.added_by_user ? (
+                    <p className="text-sm text-muted">Added by you{source ? "" : ", without a link"}.</p>
+                  ) : null}
                   {source && (
                     <a
                       href={source}
@@ -208,7 +230,7 @@ async function Company({ id }: { id: string }) {
                       rel="noopener noreferrer"
                       className="flex min-h-12 w-fit items-center text-base underline underline-offset-4"
                     >
-                      Where this came from
+                      {p.added_by_user ? "Your link" : "Where this person was found"}
                     </a>
                   )}
                 </li>
@@ -216,6 +238,10 @@ async function Company({ id }: { id: string }) {
             })}
           </ul>
         )}
+        <div className="mt-6 flex flex-col gap-6">
+          <ResearchButton companyId={company.id} />
+          <AddPersonForm companyId={company.id} />
+        </div>
       </section>
     </article>
   );
@@ -247,8 +273,86 @@ function SourceLink({ url }: { url?: string | null }) {
   );
 }
 
+// A school or hometown with the page that states it and, when founder
+// research found it, the sentence quoted from that page.
+function PersonFact({
+  label,
+  value,
+  url,
+  quote,
+  byUser,
+  domain,
+  status,
+  evidence,
+}: {
+  label: string;
+  value: string | null;
+  url: string | null;
+  quote: string | null;
+  byUser: boolean;
+  domain: string;
+  status: string | null;
+  evidence: unknown;
+}) {
+  if (!value) return null;
+  const sources = (Array.isArray(evidence) ? evidence : []) as { value: string; quote: string; url: string; single: boolean }[];
+
+  // Sources disagree: show every value with where it came from; not scored.
+  if (status === "conflicting") {
+    return (
+      <div className="flex flex-col gap-2 rounded-md border border-danger px-3 py-2">
+        <p className="text-base">
+          <span className="text-muted">{label}:</span> <span className="font-semibold text-danger">Sources disagree</span>
+          <span className="block text-sm text-muted">Not counted toward the score.</span>
+        </p>
+        <ul className="flex flex-col gap-2">
+          {sources.map((e, i) => (
+            <li key={i} className="flex flex-col gap-1">
+              <p className="text-base">
+                <span className="font-medium">{e.value}</span> <FoundOn url={e.url} domain={domain} />
+              </p>
+              <Quote text={e.quote} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-base">
+        <span className="text-muted">{label}:</span> <span className="font-medium">{value}</span>{" "}
+        {byUser && !safeHref(url) ? null : <FoundOn url={url} domain={domain} />}
+      </p>
+      {status === "shared" && (
+        <p className="text-sm text-muted">Not counted: only a sentence about several people says this.</p>
+      )}
+      {quote && <Quote text={quote} />}
+    </div>
+  );
+}
+
+function Quote({ text }: { text: string }) {
+  return (
+    <blockquote className="border-l-2 border-rule pl-3 text-sm leading-relaxed text-muted wrap-anywhere">
+      “{text.trim()}”
+    </blockquote>
+  );
+}
+
 // Every reason, with its points and the page it came from.
-function ScoreSection({ score, reasons, lookedUp }: { score: number | null; reasons: Reason[]; lookedUp: boolean }) {
+function ScoreSection({
+  score,
+  reasons,
+  lookedUp,
+  domain,
+}: {
+  score: number | null;
+  reasons: Reason[];
+  lookedUp: boolean;
+  domain: string;
+}) {
   return (
     <section aria-labelledby="score" className="mt-8 border-t-2 border-foreground pt-6">
       <div className="flex items-baseline justify-between gap-4">
@@ -279,7 +383,7 @@ function ScoreSection({ score, reasons, lookedUp }: { score: number | null; reas
             <li key={i} className="grid grid-cols-[3rem_1fr] gap-x-3 py-3">
               <span className="text-lg font-semibold tabular-nums text-accent">+{r.points}</span>
               <span className="text-lg">
-                <span className="wrap-anywhere">{r.text}</span> <FoundOn url={r.source_url} />
+                <span className="wrap-anywhere">{r.text}</span> <FoundOn url={r.source_url} domain={domain} />
               </span>
             </li>
           ))}
@@ -289,10 +393,14 @@ function ScoreSection({ score, reasons, lookedUp }: { score: number | null; reas
   );
 }
 
-function FoundOn({ url }: { url: string }) {
+// "found on /team" for the company's own site, "found on fortune.com" for
+// another; "from what you added" when the user typed or imported it.
+function FoundOn({ url, domain }: { url: string | null; domain: string }) {
   const href = safeHref(url);
-  if (!href) return null;
-  const { pathname } = new URL(href);
+  if (!href) return <span className="text-base text-muted">— from what you added</span>;
+  const { pathname, hostname } = new URL(href);
+  const host = hostname.replace(/^www\./, "");
+  const own = host === domain || host.endsWith(`.${domain}`);
   return (
     <span className="text-base text-muted">
       — found on{" "}
@@ -302,7 +410,7 @@ function FoundOn({ url }: { url: string }) {
         rel="noopener noreferrer"
         className="inline-flex min-h-11 items-center underline underline-offset-4 wrap-anywhere"
       >
-        {pathname === "/" ? "the home page" : pathname}
+        {own ? (pathname === "/" ? "the home page" : pathname) : host}
       </a>
     </span>
   );

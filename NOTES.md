@@ -177,6 +177,70 @@ Known limits:
   - "Look up all" runs only while the page is open.
 - SPEC.md: Discover is now Saturday morning, before drafts. All matches start ticked, "Add all" adds the ticked ones, and added companies go into the same lookup queue.
 
+## Finished (branch `feature/people`, 2026-10-17)
+- **Founder research** (`lib/enrich/research.ts`, `POST /api/companies/[id]/research`):
+  - Uses Haiku 5.5 with `web_search_20250305`, `max_uses: 3`. Blocked domains: LinkedIn plus people-data sites built from LinkedIn (rocketreach, zoominfo, apollo, contactout, signalhire, lusha, seamless.ai, peopledatalabs, theorg). Up to 5 people, founders first.
+  - The API's citation quotes (`cited_text` + url) are the evidence. A second structured-output Haiku call maps quotes to people.
+  - `acceptFacts` keeps a fact only if the quote names the person (full name, last name or first name; never a particle) and contains the value as whole words. If the quote names several of the people, the value goes to the person named closest before it. Colleges only, no high schools. Only empty fields are filled.
+  - The quote and its page are saved per fact (`school_source_url`/`school_quote`, `hometown_*`).
+  - Runs after a lookup, during "Look up all" (`onlyNew`), and from "Research founders" on the company page. "Look up again" only re-runs it when the lookup found someone new, so repeat lookups don't repeat the searches.
+  - It's a separate route from the lookup so each stays under 60 s. The cooldown is 60 s on `companies.researched_at`.
+- Measured cost on TurboAI: 2 searches, about 28k input and 2.3k output tokens, about $0.024 a company (max about $0.036). "Look up all" shows an estimate before it starts.
+- TurboAI test: Sarthak Dhawan → Duke University, with a quote that names him. Rudy Arora → Northwestern University, and once Frisco, Texas. Each was saved with its quote and page and scored for a Duke profile.
+- **Add a person** (company page): name, title, school, hometown, source link (http/https only), and an email only if the user typed it (shape-checked). Saved with `added_by_user`; it counts toward the score with "from what you added" when there's no link.
+- **CSV import:** optional `connection` and `source_url` columns. New companies get the tag. Already-saved untagged ones are tagged in batches with one rescore. A bad `source_url` skips the row. The tag shows under About on the company page and scores like a person's fact once the company is looked up.
+- **Scoring:** a school or hometown uses its own source when research found it. User-added facts count with no link. A list connection counts when no person matches.
+- Migration `20261017173628_people_sources.sql` adds the per-fact source and quote columns, `added_by_user` and length checks on contacts, plus `connection`, `connection_source_url` and `researched_at` on companies. No new policies: the existing per-user contacts and companies policies cover the new columns.
+- 114 tests pass, including the research checks: wrong person, particles, high school, made-up numbers.
+- Tested by script with throwaway users (deleted afterwards): research route, add person (including duplicate and bad link), and CSV tags (new, re-tag, keep an existing tag, bad link). The company page shows the quotes and source sites.
+- Fresh-context review: no RLS issue, key leak, unsafe link or LinkedIn leak. Fixed:
+  - a quote naming two founders could give one's school to the other, and name particles counted as names;
+  - "Look up again" re-charged research;
+  - CSV re-tag ran about 8 queries per row and its error wording was wrong;
+  - a cut-off research answer looked like "nothing found";
+  - the 3-search cap showed as an error;
+  - long citation URLs failed the save after the searches were paid for;
+  - CSV tags weren't visible.
+- I also blocked rocketreach.co and similar people-data sites after a test run cited one.
+- Known:
+  - The check is textual, so "worked at Duke Energy" could read as Duke. The saved quote on the page lets the user check.
+  - A joint statement ("Sarthak and Rudy are from Frisco") only credits the person named last.
+  - A "…respectively" sentence can pass if it names the person.
+  - Re-tagging from a CSV doesn't bump `facts_version` (a tiny race with a concurrent profile save; the next rescore fixes it).
+- **Leaders found by search** (after "Turbo AI test failed: the site names no one"):
+  - When no saved person is a founder or CEO, research first searches for who founded or leads the company, within the same 3 searches.
+  - `acceptLeaders` keeps a person only if the quote names them in full and calls them founder, co-founder or CEO. "Founded" counts only as "founded by …<name>" or "<name> … founded", not if "hired"/"joined"/"later" comes in between. The quote, the page title or the URL must name this company (its name, website, website label, or the name run together).
+  - Saved with `title`, `source_url` and `source_quote` (migration `20261017221923_contact_source_quote.sql`, no new policies), then researched for school and hometown like everyone else. "Needs info" clears.
+  - "Look up all" now researches companies whose site named no one.
+- **End-to-end runs, as the button does** (throwaway users, deleted afterwards):
+  - turbo.ai: the lookup found 0 people. Research found "Turbo AI was founded by Sarthak Dhawan" (getlatka.com) and saved him as Founder. Then Duke University from brut.media ("Arora and Dhawan were students at Duke University…"), scoring 3 for a Duke profile. An earlier run found Rudy Arora instead; results vary.
+  - restor3d.com: the lookup found 6 leaders on its own site, including the CEO, so no leader search was needed. Research used 3 searches and found no school or hometown stated, so nothing was saved.
+- **Fix: Rudy Arora tagged Duke.** He went to Northwestern; the source was "Arora and Dhawan were students at Duke".
+  - Research now keeps every accepted sentence (`school_evidence`/`hometown_evidence`, with links and a `single` flag), and gives each fact a status: `stated` (scored), `shared` (only a sentence about several people) or `conflicting` (different values; the page shows "Sources disagree" with each source). Only `stated` scores.
+  - A sentence is "about one person" if a part of it (split by "while", "whereas", "but" or ";") names only that person and the value, with no "they/both/respectively" or "X and Y"; or if the value is a description attached to the name ("former Duke University student Sarthak Dhawan").
+  - Facts that are shared or conflicting are researched again on the next run, and new sentences are merged with earlier ones. Search now looks up each person by name.
+  - Migration `20261017223529_person_fact_status.sql` adds the status and evidence columns. It also cleared the one earlier research fact in the user's data (Rudy's Duke at turbo.ai), dropped its points and reset `researched_at`, so research runs again under the new rules.
+  - Turbo AI retest (both founders known), run as the button does. Run 1: Rudy → Northwestern (stated); nothing found for Sarthak. Run 2: Sarthak → Duke University from a sentence about him alone (stated, +3), Rudy → Northwestern (stated), Rudy's Frisco hometown shared (not counted). Full flow from a bare turbo.ai: leader search found Rudy; his only Duke sentence was about both founders, so it was shared and not scored. A seeded conflict renders "Sources disagree" with both sources and "Not counted toward the score."
+- **Fix: only Rudy Arora was saved from "Founded by Sarthak Dhawan and Rudy Arora".**
+  - `founderNames` now reads founders from the quotes themselves, not only from the picker:
+    - the list after "founded by" or "co-founders";
+    - a role right next to a name ("The CEO of Turbo AI is Sarthak Dhawan", "Rudy Arora, co-founder of …", "founder and CEO Jane Doe");
+    - anyone in the same name list as a founder the picker named.
+  - Each name still has to pass `acceptLeaders`, and organization names (University, College, AI, Labs, …) are never people. A multi-person sentence is fine for who founded the company, just not for schools.
+  - The founder search also runs when the only saved founder was itself found by search. Once two or more founders are saved, the searches go to their schools and hometowns.
+  - "Look up again" now always runs founder research afterwards (anyone without a school or hometown is searched again), not only after finding new people.
+  - Timeout: a "Look up again" research call ran past the 35 s client timeout after several per-name searches. The search call now uses low effort, a 2500-token answer limit, an instruction to answer in short cited lines, and a 40 s timeout. 40 s plus the 15 s picker stays under the route's 60 s limit.
+  - Narrowed the "X and Y" group-sentence check to two names joined as the subject of a shared verb ("Arora and Dhawan were …"). Before, "Mathematics and Computer Science @ Duke University" counted as a group sentence.
+  - Turbo AI retest (bare turbo.ai, lookup then "Look up again" a minute later, as the button runs it):
+    - Both founders were saved from one founder sentence (Yahoo, and in another run kfor.com).
+    - Rudy Arora → Northwestern University (stated).
+    - Research took 13–19 s; no timeouts.
+    - Sarthak Dhawan's school was not saved in these runs. The Duke sources the searches returned were first-person ("I got into Duke University" in an interview; his own blog post on turbo.ai) or RocketReach (blocked). A first-person quote doesn't name him, so it isn't used.
+    - One earlier run found a sentence about him alone on Starter Story and scored Duke +3. Results depend on what each search returns.
+- **Search budget split:** 1 search to find founders (only when the site names none; founders are read from the quotes by `founderNames`, with no extra model call), then up to 3 to research people. At most 4 per company, about 2 to 5 cents. Timeouts are 15 s for the founder search, 30 s for research and 12 s for the picker, which keeps the route under 60 s. Turbo AI retest: 4 searches in 20 s. Sarthak Dhawan and Rudy Arora were both saved from Yahoo's founder sentence, and Rudy → Northwestern was stated. Sarthak's school wasn't found in this run (accepted by the user).
+- Known: the same person under two names (e.g. "Rudransh Arora" and "Rudy Arora") is saved twice; the app can't tell they're one person.
+- **Order for the rest** (user, 2026-10-17): drafts, then status, then fit (resume PDF, graduation year, role fit, flagging internships whose dates have passed like "Summer 2026"), then Discover only if time remains. About me (graduation year, degree and major, resume pasted or uploaded as a PDF up to 5 MB through Claude's PDF input; text only is stored), and role fit judged by Claude with "unclear" when unsure.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.

@@ -180,19 +180,19 @@ function validate(raw: unknown, pages: PageText[]): Extraction {
   };
 }
 
-function normalize(s: string) {
+export function normalize(s: string) {
   return s.toLowerCase().replace(/\s+/g, " ");
 }
 
 // True when `value` appears in already-normalized `haystack` as whole words,
 // so "MIT" doesn't match "submit".
-function containsWords(haystack: string, value: string) {
+export function containsWords(haystack: string, value: string) {
   const needle = normalize(value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return needle !== "" && new RegExp(`(^|[^\\p{L}\\p{N}])${needle}($|[^\\p{L}\\p{N}])`, "u").test(haystack);
 }
 
 // The quote names the person by full name, first name or last name.
-function mentionsPerson(quote: string, name: string) {
+export function mentionsPerson(quote: string, name: string) {
   const q = normalize(quote);
   const parts = name.split(/\s+/).filter((w) => w.length > 1);
   return containsWords(q, name) || parts.some((w) => containsWords(q, w));

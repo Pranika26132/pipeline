@@ -47,7 +47,7 @@ async function rescoreOnce(supabase: Supabase, companyId?: string): Promise<{ er
   const companies = await readAll<ScoreRow>((from, to) => {
     let q = supabase
       .from("companies")
-      .select("id, enriched_at, facts_version, stage, size, open_roles, field_sources")
+      .select("id, enriched_at, facts_version, stage, size, open_roles, field_sources, connection, connection_source_url")
       .order("id");
     if (companyId) q = q.eq("id", companyId);
     return q.range(from, to);
@@ -55,7 +55,12 @@ async function rescoreOnce(supabase: Supabase, companyId?: string): Promise<{ er
   if ("error" in companies) return { error: `Couldn't load your companies (${companies.error}).` };
 
   const contacts = await readAll<ScoreInput["contacts"][number] & { company_id: string }>((from, to) => {
-    let q = supabase.from("contacts").select("company_id, name, title, school, hometown, source_url").order("id");
+    let q = supabase
+      .from("contacts")
+      .select(
+        "company_id, name, title, school, hometown, source_url, school_source_url, hometown_source_url, added_by_user, school_status, hometown_status",
+      )
+      .order("id");
     if (companyId) q = q.eq("company_id", companyId);
     return q.range(from, to);
   });

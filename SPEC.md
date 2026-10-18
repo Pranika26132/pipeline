@@ -7,7 +7,7 @@ Me first. Other Duke students second (requirement: someone other than me can use
 
 ## Core loop
 1. **Add targets**: paste a company URL, or import a CSV. Sources I will feed it: YC company directory, Work at a Startup, Wellfound, quant firm lists, Duke Career Hub / DukeHub alumni exports, my own lists.
-2. **Enrich**: a serverless function fetches the company's public pages (about, team, careers) and asks Claude to extract: what they do, size/stage, roles open, founders/team names with background if stated on the page.
+2. **Enrich**: a serverless function fetches the company's public pages (about, team, careers) and asks Claude to extract: what they do, size/stage, roles open, founders/team names with background if stated on the page. Then **founder research** (see below) looks for each person's school and hometown on other public pages.
 3. **Tag and score**: each company gets tags and a "reply likelihood" score from my filters.
 4. **Draft**: pick a target, pick a contact, generate a cold email in my voice, edit it, copy it or open it as a Gmail draft.
 5. **Track**: status per target (to contact, drafted, sent, replied, interview, rejected, ghosted) plus follow-up date.
@@ -22,6 +22,16 @@ Score is a plain weighted sum I can see and change, not a black box:
 - Early stage (under ~50 people): +1
 - Already contacted: excluded by default
 Every score shows its reasons ("Founder went to Duke: found on /about page") with the source link. If the enrichment did not find something on the page, the tag is simply absent. Never guess a school or hometown.
+
+## People
+- **Founder research.** After a lookup (and during "Look up all", or from a "Research founders" button on the company page), the Claude API web search tool looks for public pages about the people found. At most 4 searches per company: 1 to find founders when the site names none, then up to 3 to research people (about 2 to 5 cents), never LinkedIn (blocked in the tool). When the company's own pages name no founder or CEO, it first uses its 1 founder search to find who founded or leads the company; a person is saved only if a citation quote names them in full as founder, co-founder or CEO, and the quote, its page title or its address names this company (to avoid same-name companies), with the quote and page saved. Each school or hometown keeps every accepted sentence with its link. It is **stated** (scored) only when a sentence about that person alone says it (a part of a sentence split by "while"/"but"/";" or a description attached to the name counts; "Arora and Dhawan were students at Duke" doesn't) and nothing found contradicts it. Only a sentence about several people: **shared**, shown but not scored. Different values found: **conflicting**, shown as "Sources disagree" with every source, not scored. A school (a college, never a high school) or hometown is saved only when a page found by the search states it: the API's citation quote must name the person and contain the school or place, and the quote and its page link are saved with it. Only empty fields are filled. Never guessed.
+- **Add a person** on the company page: name, title, school, hometown, a source link, and an email only if typed by the user. What the user types counts toward the score ("from what you added" when there's no link).
+- **CSV import** takes two optional columns: `connection` (e.g. "Duke" for a list of Duke-founded companies) and `source_url` (the page the list came from). A connection that matches the profile's school or hometown counts toward the score with that page as its source. An already-saved company gets the tag if it has none.
+
+## Fit (next, `feature/fit`)
+- **About me** on /profile, all optional: graduation year, degree and major, and a resume. The resume can be pasted, or uploaded as a PDF (max 5 MB): a server route sends the PDF to Claude as a PDF document input (no new dependency), and the extracted plain text fills the resume box for review and editing before saving. Only the text is stored, never the file. Wrong file type, too big, or unreadable each show a clear error.
+- **Role fit.** "Hiring for a role I want" only counts roles that fit: internship or new-grad level (not senior, PhD-only, or "X+ years"), matching the target roles, and plausibly the user's skills and major. Claude decides per role from the role text on the page plus the profile, and the reason says why ("Hiring SWE interns — fits your CS major, class of 2028") with the source link. When it can't tell, it says "unclear" rather than guessing, and an unclear role doesn't count.
+- Drafts (later) use the resume for one relevant line about the user.
 
 ## Email drafting
 - Input: company summary, contact (if any), my profile, 2-3 samples of my own writing, which hook to use (alumni, hometown, a specific thing they built).
@@ -43,7 +53,7 @@ A way to find new targets without leaving the app.
 ## Data (Postgres on Supabase, RLS on every table)
 - `profiles`: user_id, school, hometown, interests, role_targets, writing_samples
 - `companies`: id, user_id, name, url, summary, stage, size, source, score, score_reasons (jsonb), created_at
-- `contacts`: id, company_id, user_id, name, title, school, hometown, source_url, email (optional, user-entered)
+- `contacts`: id, company_id, user_id, name, title, school, hometown, source_url, email (optional, user-entered), school_source_url + school_quote and hometown_source_url + hometown_quote (where each fact was stated), added_by_user
 - `outreach`: id, company_id, contact_id, user_id, draft, status, sent_at, follow_up_on
 
 RLS rule on all four: `user_id = auth.uid()`.
@@ -73,9 +83,8 @@ Next.js on Vercel, Supabase (auth + Postgres), one server route for enrichment a
 ## Build plan (deadline: Mon Oct 19, 11:59pm)
 - **Tue night / Wed**: repo, Next.js, Supabase tables + RLS, auth, deploy to Vercel. Empty app live on day one.
 - **Thu**: add company + enrichment + list page
-- **Fri**: scoring, filters, profile page
-- **Sat morning**: Discover (HN "Who is hiring?" matches, select and add, auto-queued for lookup)
-- **Sat afternoon**: draft generation + status tracking
+- **Fri**: scoring, filters, profile page, Look up all
+- **Sat**, in order, one branch each: people (founder research, add person, CSV connection), fit (About me, resume, role fit), Discover (HN "Who is hiring?" matches, select and add, auto-queued for lookup), drafts, status tracking
 - **Sun**: second-user test for RLS, phone pass, security pass, fresh-session review against this spec
 - **Mon**: record the <3 min video, submit
 
