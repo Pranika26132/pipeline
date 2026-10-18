@@ -77,8 +77,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   if (profileResult.error) return fail(500, `Couldn't load your profile (${profileResult.error.message}).`);
 
   const company = companyResult.data;
-  const signature = profileResult.data?.full_name?.trim();
-  if (!signature) return fail(422, "Add your name in your profile first. Drafts are signed with it.");
+  // Signed with the profile name when there is one; otherwise "Best," alone.
+  const signature = profileResult.data?.full_name?.trim() || null;
   // The name the pages state, else a readable one from the website
   // ("oxide.computer" → "Oxide"). Drafts never wait on the name.
   company.name = displayName(company.name, company.domain);

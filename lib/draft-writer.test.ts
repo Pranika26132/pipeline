@@ -12,6 +12,13 @@ describe("signOff", () => {
     expect(signOff("Hi Rudy,\n\nQuick question.", "Pranika Kumar")).toBe("Hi Rudy,\n\nQuick question.\n\nBest,\nPranika Kumar");
   });
 
+  it("ends with Best, alone when the profile has no name", () => {
+    // A name the model made up is dropped.
+    expect(signOff("Hi Rudy,\n\nQuick question.\n\nBest,\nJordan Lee", null)).toBe("Hi Rudy,\n\nQuick question.\n\nBest,");
+    expect(signOff("Hi Rudy,\n\nQuick question.\n\nThanks!", null)).toBe("Hi Rudy,\n\nQuick question.\n\nBest,");
+    expect(signOff("Hi Rudy,\n\nQuick question.", "  ")).toBe("Hi Rudy,\n\nQuick question.\n\nBest,");
+  });
+
   it("keeps a closing sentence that isn't a sign-off", () => {
     expect(signOff("Hi Rudy,\n\nThanks for your time.\n\nBest,", "Pranika")).toBe("Hi Rudy,\n\nThanks for your time.\n\nBest,\nPranika");
   });

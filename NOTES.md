@@ -282,6 +282,7 @@ Known limits:
 ## Finished (branch `fix/draft-company-name`, 2026-10-18)
 - Drafts never wait on the company name. They use the name the company's pages state (found on lookup); otherwise `nameFromDomain` makes a readable one: drop the ending and capitalize words, with ".ai" said as "AI" ("oxide.computer" → "Oxide", "turbo.ai" → "Turbo AI", "acme-labs.com" → "Acme Labs"). `displayName` is used in the draft route, the company page heading and the list.
 - "Edit name" on the company page is an optional, closed control instead of a required box.
+- Drafts never wait on "Your name" either. With a name in the profile they end "Best,\n<name>". Without one they end with "Best," alone for the student to sign. `signOff` also drops a name the model made up. The profile field stays optional. Retest with no profile name: the oxide.computer draft generated straight away and ended with "Best,".
 - Retest: a draft for a company saved as "oxide.computer", with no name set, worked straight away. It said "Oxide" throughout and was 88 words.
 
 ## Decisions
