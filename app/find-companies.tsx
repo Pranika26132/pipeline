@@ -18,7 +18,17 @@ type Results = { request: string; companies: FoundCompany[]; searches: number; l
 
 // "Find companies": Claude searches the web for companies matching a request.
 // Results are a checklist; nothing is added until the user taps Add.
-export function FindCompanies({ inputRef }: { inputRef?: React.Ref<HTMLTextAreaElement> }) {
+// `onBusy` reports a running search or add; `onDone` fires when one finishes,
+// so a closed box can reopen to show the results or the error.
+export function FindCompanies({
+  inputRef,
+  onBusy,
+  onDone,
+}: {
+  inputRef?: React.Ref<HTMLTextAreaElement>;
+  onBusy?: (busy: "searching" | "adding" | null) => void;
+  onDone?: () => void;
+}) {
   const router = useRouter();
   const [, startRefresh] = useTransition();
   const [request, setRequest] = useState("");
@@ -33,6 +43,7 @@ export function FindCompanies({ inputRef }: { inputRef?: React.Ref<HTMLTextAreaE
     e.preventDefault();
     if (searching) return;
     setSearching(true);
+    onBusy?.("searching");
     setError(null);
     setAdded(null);
     let body: FindResponse | null = null;
@@ -49,6 +60,8 @@ export function FindCompanies({ inputRef }: { inputRef?: React.Ref<HTMLTextAreaE
       body = { ok: false, error: `Couldn't reach the server (${(err as Error).message}). Check your connection.` };
     }
     setSearching(false);
+    onBusy?.(null);
+    onDone?.();
     if (!body.ok) {
       setError(body.error);
       return;
@@ -62,6 +75,7 @@ export function FindCompanies({ inputRef }: { inputRef?: React.Ref<HTMLTextAreaE
     const picked = results.companies.filter((c) => ticked.has(c.domain));
     if (picked.length === 0) return;
     setAdding(true);
+    onBusy?.("adding");
     let state: AddState;
     try {
       state = await addFromFind(picked.map((c) => ({ name: c.name, url: c.url })), results.request);
@@ -69,6 +83,8 @@ export function FindCompanies({ inputRef }: { inputRef?: React.Ref<HTMLTextAreaE
       state = { error: "Couldn't reach the server, so nothing was added. Try again." };
     }
     setAdding(false);
+    onBusy?.(null);
+    onDone?.();
     setAdded(state);
     if (state.added?.length) {
       // Added companies go straight into Look up all and get scored.

@@ -367,7 +367,13 @@ Known limits:
 
 ## Finished (branch `feature/find-entry`, 2026-10-18)
 - "Add companies" and "Find companies" sit side by side on `/` (`app/home-actions.tsx`). Find opens the search box under them and focuses it. The box stays mounted once opened, so closing and reopening keeps the request and the results. The box's own button now says "Search".
-- **Tested at 390 px** in headless Chrome: both buttons fit on one row, a tap opens the box with the text field focused, and there's no sideways scroll.
+- **Tested at 390 and 360 px** in headless Chrome:
+  - both labels fit on one line (the text is a step smaller under 400 px);
+  - a tap opens the box with the text field focused;
+  - there's no sideways scroll.
+- **Fresh-context review fixes:**
+  - the panel's container is always in the page, so the button's `aria-controls` has a target;
+  - closing the box mid-search no longer hides the outcome: the button reads "Searching…" or "Adding…" while one runs, and the box reopens when it finishes, showing the results or the error.
 
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).

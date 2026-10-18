@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { FindCompanies } from "./find-companies";
 
 const base =
-  "flex min-h-14 items-center justify-center rounded-lg px-3 text-center text-lg leading-tight font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+  "flex min-h-14 items-center justify-center rounded-lg px-2 text-center text-base leading-tight font-semibold min-[400px]:text-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
 // The two ways to add to the list, side by side. "Find companies" opens the
 // search box under them; it stays mounted once opened, so closing and
@@ -14,6 +14,7 @@ const base =
 export function HomeActions() {
   const [open, setOpen] = useState(false);
   const [opened, setOpened] = useState(false);
+  const [busy, setBusy] = useState<"searching" | "adding" | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -36,14 +37,13 @@ export function HomeActions() {
           }}
           className={`${base} border-2 ${open ? "border-accent bg-field" : "border-foreground"}`}
         >
-          Find companies
+          {!open && busy ? (busy === "searching" ? "Searching…" : "Adding…") : "Find companies"}
         </button>
       </div>
-      {opened && (
-        <div id="find-panel" hidden={!open}>
-          <FindCompanies inputRef={input} />
-        </div>
-      )}
+      {/* Always in the page so aria-controls has a target; the box mounts on first open. */}
+      <div id="find-panel" hidden={!open}>
+        {opened && <FindCompanies inputRef={input} onBusy={setBusy} onDone={() => setOpen(true)} />}
+      </div>
     </div>
   );
 }
