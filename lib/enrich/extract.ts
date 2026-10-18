@@ -14,6 +14,7 @@ Rules:
 - Give a person's school or hometown only when the page states it for that person, using the page's wording. Otherwise use null.
 - When you give a school or hometown, set evidence to the exact sentence from the page that states it, copied character for character and including the person's name. Otherwise evidence is null.
 - Every fact cites source_url: the url attribute of the page that states it, copied exactly.
+- company_name: the company's name as its pages write it (for example "Turbo AI", not "turbo.ai"); null if unclear.
 - summary: one or two plain sentences on what the company does, from the pages. If the pages don't say what it does, summary.value is null. Never describe the pages themselves or what they lack.
 - stage: funding stage or accelerator batch only if stated (for example "Seed", "Series A", "YC W24"). size: headcount only if stated. Otherwise null.
 - open_roles: job openings listed on the pages, with title as written and location if stated.
@@ -25,8 +26,10 @@ const nullableString = { type: ["string", "null"] };
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "stage", "size", "open_roles", "people"],
+  required: ["company_name", "summary", "stage", "size", "open_roles", "people"],
   properties: {
+    // The company's name as its own pages write it ("Turbo AI").
+    company_name: nullableString,
     summary: fact(),
     stage: fact(),
     size: fact(),
@@ -76,7 +79,7 @@ export type Person = {
   hometown: string | null;
   source_url: string;
 };
-export type Extraction = { summary: Fact; stage: Fact; size: Fact; open_roles: Role[]; people: Person[] };
+export type Extraction = { companyName: string | null; summary: Fact; stage: Fact; size: Fact; open_roles: Role[]; people: Person[] };
 
 // The model's reply wasn't usable JSON. Carries a message for the user.
 export class BadModelOutputError extends Error {}
@@ -171,7 +174,11 @@ function validate(raw: unknown, pages: PageText[]): Extraction {
     });
   }
 
+  // The name must appear on a page we read, so it isn't guessed.
+  const name = str(raw.company_name, LIMITS.short);
+  const companyName = name && pages.some((p) => containsWords(normalize(p.text), name)) ? name : null;
   return {
+    companyName,
     summary: toFact(raw.summary, LIMITS.summary),
     stage: toFact(raw.stage, LIMITS.short),
     size: toFact(raw.size, LIMITS.short),

@@ -50,6 +50,11 @@ export function ProfileForm({ initial }: { initial: ProfileValues }) {
           About you
         </h2>
         <label className="flex flex-col gap-2">
+          <span className="text-base font-medium">Your name</span>
+          <input name="fullName" defaultValue={values.fullName} maxLength={100} autoComplete="name" className={field} />
+          <span className="text-sm text-muted">Drafts are signed with it.</span>
+        </label>
+        <label className="flex flex-col gap-2">
           <span className="text-base font-medium">School</span>
           <input name="school" defaultValue={values.school} maxLength={LIMITS.text} autoComplete="organization" className={field} />
           <span className="text-sm text-muted">Use the name founders would list, like Duke University.</span>

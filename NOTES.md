@@ -241,6 +241,44 @@ Known limits:
 - Known: the same person under two names (e.g. "Rudransh Arora" and "Rudy Arora") is saved twice; the app can't tell they're one person.
 - **Order for the rest** (user, 2026-10-17): drafts, then status, then fit (resume PDF, graduation year, role fit, flagging internships whose dates have passed like "Summer 2026"), then Discover only if time remains. About me (graduation year, degree and major, resume pasted or uploaded as a PDF up to 5 MB through Claude's PDF input; text only is stored), and role fit judged by Claude with "unclear" when unsure.
 
+## Finished (branch `feature/drafts`, 2026-10-18)
+- `lib/drafts.ts`:
+  - `draftFacts` builds a numbered list of facts: the company (summary, stage, size, open roles, score reasons), the person (name and title; school and hometown only if they count, so "shared" and "conflicting" are left out), and the profile.
+  - `checkDraft` requires the body to be under 120 words, with no stock phrases (list in `STOCK_PHRASES`), no bracket placeholders, no number missing from the facts (durations like "15-minute" are allowed), and a named company fact.
+  - `gmailComposeUrl` builds the `mail.google.com/mail/?view=cm` link.
+- `lib/draft-writer.ts`: Opus 5.5 at low effort with structured output and server-side fallbacks (`fallbacks: "default"`). One retry, appended to the conversation, when a check fails; then the problems are shown. The prompt allows exactly one company fact and nothing outside the facts (it rules out nicknames like "Blue Devil", and anything about the student that isn't in their profile). With no samples, the tone is clear, friendly and professional. The email ends "Best," with no name.
+- `POST /api/companies/[id]/draft`: same origin, auth and key checks as the other routes. A person from another company or user isn't found (RLS plus `eq company_id`). Saves through `lib/outreach.ts` `saveDraft`, which updates the newest outreach row or creates one; "to_contact" becomes "drafted" and a later status is kept. A company with no company facts gets "Look it up first."
+- Company page: "Draft an email" section with To (people or the team), Lead with, Write a draft, editable subject and body, live word count, a stock-phrase warning, Save changes (server action), Copy, and Open in Gmail. Gmail fills in the address only if the user typed one. The page says Pipeline never sends email.
+- Migration `20261018004223_outreach_drafts.sql`: `outreach.subject`, `updated_at`, and length checks. No new policies: the existing outreach policies (own company, and a contact from that company) cover them.
+- Tested by script (throwaway users, deleted): drafts to a person and to the team, with and without samples, 83 to 94 words, about 5 to 7 s each, saved with status "drafted". The first version said "fellow Blue Devil" and used three company facts in one email; the prompt was tightened and the retest used one fact and nothing invented. 135 tests pass.
+
+- **Fresh-context review:** nothing can send email; no RLS hole, key leak or redirectable link. Fixed:
+  - a saved "team" draft reopened addressed to the first person;
+  - changing "To" silently re-addressed an existing draft (the draft now remembers its recipient and says so);
+  - the recipient line counted as "the company fact";
+  - the number check matched substrings ("20" inside "2027") and rejected "15–20 minutes";
+  - a follow-up draft overwrote the record of a sent email (it's now a new row);
+  - the retry could pass the 60 s limit (now one 50 s deadline);
+  - a written draft was lost if saving failed;
+  - clearing the body hid the editor;
+  - very long drafts broke the Gmail link (now "use Copy");
+  - page text could slip a link or address into a draft (escaped, and links/addresses are rejected);
+  - drafts used a person's school with no source (same rule as scoring now).
+- Known: after a follow-up draft, the company's newest row is "drafted", so the list shows Drafted rather than Sent. `feature/status` should decide how status reads across rows.
+
+- **Less generic drafts** (user, 2026-10-18):
+  - A role whose dates have passed (`lib/roles.ts` `roleTiming`, e.g. "Summer 2026" in October 2026) is never presented as open; the draft asks about upcoming internships instead.
+  - The interests list is no longer a fact. Target roles are given with "name at most one". The draft adds one concrete line about the student from a profile fact or something a writing sample states; sample text counts as known for the number check.
+  - Drafts prefer a specific "what they build" sentence. Facts are now `company` (exactly one), `connection` (shared school or hometown, at most one), `recipient` and `me`.
+  - Company names: the lookup extracts the company's name as its pages write it (it must appear on a page) and replaces a domain-style name (`looksLikeDomain`). When the name still looks like a domain, the company page shows a "Company name" field, and drafts ask for a name first.
+  - "Your name" on /profile (migration `20261018010306_profile_full_name.sql`, no new policies) signs drafts.
+  - Turbo AI test: the lookup renamed "turbo.ai" to "Turbo AI". Both drafts (106 and 114 words) said what Turbo AI builds, treated the Summer 2026 role as past and asked about upcoming internships, used the compilers-parser line from a sample, and signed with the name. The draft to Sarthak also mentioned the past role alongside the product.
+- **Sign-off and school wording** (user):
+  - Drafts always end "Best,\n<full_name>": `signOff` replaces whatever closing the model wrote. Without a name in the profile, the draft route asks for one first.
+  - A shared school is worded neutrally ("I'm a Duke student and saw you studied at Duke"), never claiming the person's current status. Turbo AI retest: both drafts used that wording and ended with the name.
+  - Watch: one draft said "a small team like yours", which isn't from a fact.
+- **Why Turbo AI scored 0:** the user's profile has "Hiring for a role I want" set to "Doesn't matter" (`weight_open_role = 0`). The matching itself works.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.

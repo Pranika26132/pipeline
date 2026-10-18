@@ -40,6 +40,7 @@ Every score shows its reasons ("Founder went to Duke: found on /about page") wit
 - Writing samples are optional. If the profile has none, drafts use a clear, friendly, professional tone instead (still no stock phrases).
 - Only uses facts that came from the enrichment or my profile. No invented compliments or numbers.
 - **The app never sends anything.** It produces a draft; I read it and send it.
+- Built (`feature/drafts`): "Draft an email" on the company page. Pick a recipient (a saved person, or the team) and what to lead with (same school, same hometown, an open role, what they build; only the ones a fact supports). Claude Opus 5.5 writes from a numbered list of facts: company facts with sources, the person's counted facts, and profile facts. Every draft is checked before it's shown (under 120 words, no stock phrases, no placeholders, no number that isn't in the facts, one named company fact), with one retry. The draft is saved on the company's outreach row and the status becomes "drafted". It can be edited (live word count and stock-phrase warning), copied, or opened in Gmail's compose window, with the address filled in only if the user typed one.
 
 ## Discover (Saturday morning, before drafts)
 A way to find new targets without leaving the app.

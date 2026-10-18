@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { describeModelError } from "@/lib/enrich/errors";
 import { extract } from "@/lib/enrich/extract";
 import { collectPages } from "@/lib/enrich/pages";
+import { looksLikeDomain } from "@/lib/domain";
 import { describeFetchError } from "@/lib/enrich/safe-fetch";
 import { API_KEY_MESSAGE, isWellFormedApiKey, redactSecrets } from "@/lib/redact";
 import { rescore } from "@/lib/rescore";
@@ -178,6 +179,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   const update = await supabase
     .from("companies")
     .update({
+      // A name saved as the website ("turbo.ai") gets the name the pages use.
+      ...(result.companyName && looksLikeDomain(company.name, company.domain) ? { name: result.companyName } : {}),
       summary: result.summary?.value ?? company.summary,
       stage: result.stage?.value ?? company.stage,
       size: result.size?.value ?? company.size,

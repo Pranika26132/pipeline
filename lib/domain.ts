@@ -88,3 +88,10 @@ export function normalizeCompanyUrl(input: string): NormalizedUrl {
 
   return { ok: true, url: parsed.href, domain: host };
 }
+
+// "turbo.ai", "www.turbo.ai" or "turbo": a company name taken from its
+// website rather than a real name.
+export function looksLikeDomain(name: string, domain: string): boolean {
+  const n = name.trim().toLowerCase().replace(/^www\./, "");
+  return n === domain || n === domain.split(".")[0] || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(n);
+}

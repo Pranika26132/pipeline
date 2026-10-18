@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { bumpFactsVersion } from "@/lib/facts";
+import { saveDraft } from "@/lib/outreach";
 import { rescore } from "@/lib/rescore";
 import { createClient } from "@/lib/supabase/server";
 
@@ -80,4 +81,49 @@ export async function addPerson(companyId: string, _prev: AddPersonState, formDa
     return { submittedAt, added: values.name, error: `Added ${values.name}, but the score couldn't be updated. ${scored.error}` };
   }
   return { submittedAt, added: values.name };
+}
+
+export type SaveDraftState = { error?: string; savedAt?: number };
+
+// Saves the user's edits to the draft. The text is theirs; it's only checked
+// for length. Nothing is sent.
+export async function saveEditedDraft(companyId: string, _prev: SaveDraftState, formData: FormData): Promise<SaveDraftState> {
+  const subject = String(formData.get("subject") ?? "").trim();
+  const body = String(formData.get("body") ?? "").trim();
+  const rawContact = String(formData.get("contactId") ?? "");
+  const contactId = UUID.test(rawContact) ? rawContact : null;
+
+  const supabase = await createClient();
+  const { data: auth, error: authError } = await supabase.auth.getClaims();
+  if (authError) return { error: `Your session couldn't be checked (${authError.message}). Sign in again.` };
+  if (!auth?.claims) return { error: "You're signed out. Sign in again to save the draft." };
+  if (!UUID.test(companyId)) return { error: "That company isn't in your list." };
+  if (!body) return { error: "The draft is empty." };
+  if (subject.length > 200) return { error: "The subject is too long. Keep it under 200 characters." };
+  if (body.length > 5000) return { error: "The draft is too long to save." };
+
+  const saved = await saveDraft(supabase, companyId, { subject, body, contactId });
+  if (saved.error) return { error: saved.error };
+  revalidatePath("/", "layout");
+  return { savedAt: Date.now() };
+}
+
+export type RenameState = { error?: string; savedAt?: number };
+
+// Sets the company's name (e.g. "Turbo AI" for one saved as "turbo.ai").
+export async function renameCompany(companyId: string, _prev: RenameState, formData: FormData): Promise<RenameState> {
+  const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
+  const supabase = await createClient();
+  const { data: auth, error: authError } = await supabase.auth.getClaims();
+  if (authError) return { error: `Your session couldn't be checked (${authError.message}). Sign in again.` };
+  if (!auth?.claims) return { error: "You're signed out. Sign in again to rename the company." };
+  if (!UUID.test(companyId)) return { error: "That company isn't in your list." };
+  if (!name) return { error: "Enter the company's name." };
+  if (name.length > MAX) return { error: `Keep the name under ${MAX} characters.` };
+  // RLS limits the update to the user's own company.
+  const { data, error } = await supabase.from("companies").update({ name }).eq("id", companyId).select("id");
+  if (error) return { error: `Couldn't rename the company (${error.message}).` };
+  if (data.length === 0) return { error: "That company isn't in your list." };
+  revalidatePath("/", "layout");
+  return { savedAt: Date.now() };
 }
