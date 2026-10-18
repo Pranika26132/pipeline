@@ -20,7 +20,7 @@ import type { Factor, Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
 import { FollowUpBadge } from "./follow-up-badge";
-import { FindCompanies } from "./find-companies";
+import { HomeActions } from "./home-actions";
 import { LookUpAll } from "./look-up-all";
 import { TopBar } from "./top-bar";
 
@@ -150,13 +150,7 @@ async function TargetList({ filters }: { filters: Filters }) {
               : `${companies.length} ${companies.length === 1 ? "company" : "companies"}, highest score first.`}
           </p>
         )}
-        <Link
-          href="/add"
-          className="flex min-h-14 items-center justify-center rounded-lg bg-accent px-6 text-lg font-semibold text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          Add companies
-        </Link>
-        <FindCompanies />
+        <HomeActions />
         {/* Always rendered, so a refresh that fails mid-run doesn't end the run. */}
         <LookUpAll
           pending={notLooked.data ?? []}

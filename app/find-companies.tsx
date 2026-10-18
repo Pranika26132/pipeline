@@ -18,7 +18,7 @@ type Results = { request: string; companies: FoundCompany[]; searches: number; l
 
 // "Find companies": Claude searches the web for companies matching a request.
 // Results are a checklist; nothing is added until the user taps Add.
-export function FindCompanies() {
+export function FindCompanies({ inputRef }: { inputRef?: React.Ref<HTMLTextAreaElement> }) {
   const router = useRouter();
   const [, startRefresh] = useTransition();
   const [request, setRequest] = useState("");
@@ -83,13 +83,15 @@ export function FindCompanies() {
 
   return (
     <section aria-labelledby="find" className="flex flex-col gap-4 rounded-lg border-2 border-foreground p-4">
-      <h2 id="find" className="text-2xl font-semibold tracking-[-0.02em]">
+      {/* The "Find companies" button above the box already names it. */}
+      <h2 id="find" className="sr-only">
         Find companies
       </h2>
       <form onSubmit={find} className="flex flex-col gap-3">
         <label className="flex flex-col gap-2">
           <span className="text-base text-muted">Say what you’re looking for. Your profile is used too.</span>
           <textarea
+            ref={inputRef}
             value={request}
             onChange={(e) => setRequest(e.target.value)}
             rows={2}
@@ -99,7 +101,7 @@ export function FindCompanies() {
           />
         </label>
         <button type="submit" disabled={searching || request.trim().length < 3} aria-busy={searching} className={primary}>
-          {searching ? "Searching…" : "Find companies"}
+          {searching ? "Searching…" : "Search"}
         </button>
         <p className="text-sm text-muted">
           {searching

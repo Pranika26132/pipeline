@@ -365,6 +365,10 @@ Known limits:
   - no sideways scrolling on `/`, `/add`, a company page or `/profile`;
   - tapping Sign out landed on `/login`, and `/profile` afterwards redirected to `/login`.
 
+## Finished (branch `feature/find-entry`, 2026-10-18)
+- "Add companies" and "Find companies" sit side by side on `/` (`app/home-actions.tsx`). Find opens the search box under them and focuses it. The box stays mounted once opened, so closing and reopening keeps the request and the results. The box's own button now says "Search".
+- **Tested at 390 px** in headless Chrome: both buttons fit on one row, a tap opens the box with the text field focused, and there's no sideways scroll.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.

@@ -45,7 +45,7 @@ Every score shows its reasons ("Founder went to Duke: found on /about page") wit
 
 ## Find companies (`feature/find`; replaces Discover, which is cut)
 A way to find new targets without leaving the app.
-- A **Find companies** box on `/`: type a request in plain English ("early-stage quant firms in NYC hiring interns"). The profile (target roles, interests, major, class year, school, hometown) is sent with it.
+- A **Find companies** button next to "Add companies" on `/` opens a box: type a request in plain English ("early-stage quant firms in NYC hiring interns"). The profile (target roles, interests, major, class year, school, hometown) is sent with it.
 - `/api/find`: Claude (Haiku) with the web search tool, at most 10 searches per request (about 10 to 20 cents, shown under the box), LinkedIn and people-data sites blocked. It proposes up to 12 companies: name, website, why, and the search result it was found in.
 - **Nothing invented.** A company is shown only when all of these hold:
   - its source is a URL the search tool actually returned;
