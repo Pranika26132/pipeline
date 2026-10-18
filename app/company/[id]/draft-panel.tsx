@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useActionState, useState, useTransition } from "react";
 
-import { gmailComposeUrl, HOOKS, MAX_WORDS, STOCK_PHRASES, wordCount, type Hook } from "@/lib/drafts";
+import { GMAIL_URL_LIMIT, gmailComposeUrl, HOOKS, MAX_WORDS, STOCK_PHRASES, wordCount, type Hook } from "@/lib/drafts";
 
 import type { DraftResponse } from "../../api/companies/[id]/draft/route";
 import { saveEditedDraft, type SaveDraftState } from "./actions";
@@ -31,7 +31,11 @@ export function DraftPanel({
 }) {
   const router = useRouter();
   const [, startRefresh] = useTransition();
-  const [contactId, setContactId] = useState(saved?.contactId ?? people[0]?.id ?? "");
+  // "" means the team. A saved team draft stays addressed to the team.
+  const [contactId, setContactId] = useState(saved ? (saved.contactId ?? "") : (people[0]?.id ?? ""));
+  // Who the current draft was written to; the dropdown only picks the next one.
+  const [draftContactId, setDraftContactId] = useState(saved ? (saved.contactId ?? "") : "");
+  const [hasDraft, setHasDraft] = useState(!!saved);
   const [hook, setHook] = useState<Hook>("auto");
   const [subject, setSubject] = useState(saved?.subject ?? "");
   const [body, setBody] = useState(saved?.body ?? "");
@@ -49,8 +53,10 @@ export function DraftPanel({
     {},
   );
 
-  const recipient = people.find((p) => p.id === contactId) ?? null;
+  const recipient = people.find((p) => p.id === draftContactId) ?? null;
+  const pickedOther = hasDraft && contactId !== draftContactId;
   const words = wordCount(body);
+  const gmailUrl = gmailComposeUrl({ to: recipient?.email, subject, body });
   const lower = `${subject}\n${body}`.toLowerCase().replace(/[’]/g, "'");
   const stock = STOCK_PHRASES.filter((p) => lower.includes(p));
 
@@ -65,10 +71,13 @@ export function DraftPanel({
     }
     setSubject(result.subject);
     setBody(result.body);
-    setNote({
-      kind: "info",
-      text: `${result.toTeam ? "No one picked, so it's written to the team. " : ""}Uses: ${result.fact}`,
-    });
+    setDraftContactId(result.contactId ?? "");
+    setHasDraft(true);
+    setNote(
+      result.warning
+        ? { kind: "error", text: `${result.warning} Use Save changes to try again, or Copy it.` }
+        : { kind: "info", text: `${result.toTeam ? "No one picked, so it's written to the team. " : ""}Uses: ${result.fact}` },
+    );
     startRefresh(() => router.refresh());
   }
 
@@ -133,9 +142,14 @@ export function DraftPanel({
         )}
       </div>
 
-      {body && (
+      {hasDraft && (
         <form action={saveAction} className="flex flex-col gap-4">
-          <input type="hidden" name="contactId" value={contactId} />
+          <input type="hidden" name="contactId" value={draftContactId} />
+          {pickedOther && (
+            <p className="rounded-md border border-rule px-4 py-3 text-base">
+              This draft is to {recipient ? recipient.name : "the team"}. Write a new draft to change who it’s to.
+            </p>
+          )}
           <label className="flex flex-col gap-2">
             <span className="text-base font-medium">Subject</span>
             <input name="subject" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} className={field} />
@@ -176,14 +190,15 @@ export function DraftPanel({
             <button type="button" onClick={copy} className={secondary}>
               {copied ? "Copied" : "Copy"}
             </button>
-            <a
-              href={gmailComposeUrl({ to: recipient?.email, subject, body })}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={secondary}
-            >
-              Open in Gmail
-            </a>
+            {gmailUrl.length <= GMAIL_URL_LIMIT ? (
+              <a href={gmailUrl} target="_blank" rel="noopener noreferrer" className={secondary}>
+                Open in Gmail
+              </a>
+            ) : (
+              <p className="flex min-h-12 items-center justify-center rounded-lg border border-rule px-4 text-center text-sm text-muted">
+                Too long for a Gmail link; use Copy.
+              </p>
+            )}
           </div>
           <p className="text-sm text-muted">
             Pipeline never sends email. Gmail opens a draft

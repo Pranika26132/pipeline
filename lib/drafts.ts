@@ -50,7 +50,15 @@ export const HOOKS: { value: Hook; label: string }[] = [
   { value: "product", label: "What they build" },
 ];
 
-export type DraftFact = { id: string; kind: "company" | "person" | "me"; hook?: Exclude<Hook, "auto">; text: string; source?: string | null };
+// "recipient" says who the email is to; it can't be the company fact a draft
+// leads with.
+export type DraftFact = {
+  id: string;
+  kind: "company" | "person" | "recipient" | "me";
+  hook?: Exclude<Hook, "auto">;
+  text: string;
+  source?: string | null;
+};
 
 export type DraftInput = {
   company: {
@@ -91,7 +99,7 @@ export function draftFacts({ company, contact, profile }: DraftInput): DraftFact
   }
 
   if (contact) {
-    add({ kind: "person", text: `The email is to ${contact.name}${contact.title ? `, ${contact.title} at ${company.name}` : ` at ${company.name}`}` });
+    add({ kind: "recipient", text: `The email is to ${contact.name}${contact.title ? `, ${contact.title} at ${company.name}` : ` at ${company.name}`}` });
     if (contact.school && contact.schoolCounts) add({ kind: "person", hook: "alumni", text: `${contact.name} went to ${contact.school}` });
     if (contact.hometown && contact.hometownCounts) add({ kind: "person", hook: "hometown", text: `${contact.name} is from ${contact.hometown}` });
   }
@@ -107,7 +115,7 @@ export function draftFacts({ company, contact, profile }: DraftInput): DraftFact
 // beats an open role, which beats what they build.
 export function availableHooks(facts: DraftFact[]): Exclude<Hook, "auto">[] {
   const order: Exclude<Hook, "auto">[] = ["alumni", "hometown", "role", "product"];
-  return order.filter((h) => facts.some((f) => f.hook === h && f.kind !== "me"));
+  return order.filter((h) => facts.some((f) => f.hook === h && (f.kind === "company" || f.kind === "person")));
 }
 
 export function wordCount(text: string): number {
@@ -127,24 +135,36 @@ export function checkDraft(draft: { subject: string; body: string }, facts: Draf
   if (stock.length) problems.push(`It uses stock phrases: ${stock.map((p) => `"${p}"`).join(", ")}.`);
   if (/\[[^\]]*\]|\{[^}]*\}|<[^>]*>/.test(draft.body + draft.subject)) problems.push("It has a placeholder in brackets.");
   // A number the facts don't contain was made up ("5 million users").
+  // Numbers are compared as whole tokens, so "20" isn't found inside "2027".
   const known = facts.map((f) => f.text).join(" ");
-  // Durations in the ask ("a 15-minute call") aren't claims about anyone.
-  const text = (draft.subject + " " + draft.body).replace(/\b\d+[- ]?(?:minutes?|mins?)\b/gi, " ");
-  const invented = [...new Set(text.match(/\d[\d,.]*/g) ?? [])]
-    .map((n) => n.replace(/[.,]+$/, ""))
-    .filter((n) => n && !known.includes(n));
+  const tokens = (t: string) => new Set((t.match(/\d[\d,.]*/g) ?? []).map((n) => n.replace(/[.,]+$/, "").replace(/,/g, "")));
+  const knownNumbers = tokens(known);
+  // Durations in the ask ("a 15-minute call", "15–20 minutes") aren't claims.
+  const text = (draft.subject + " " + draft.body).replace(/\b\d+(?:\s*[-–]\s*\d+)?[- ]?(?:minutes?|mins?)\b/gi, " ");
+  const invented = [...tokens(text)].filter((n) => n && !knownNumbers.has(n));
   if (invented.length) problems.push(`It has numbers not in the facts: ${invented.join(", ")}.`);
+  const scale = (text.match(/\b(hundreds?|thousands?|millions?|billions?)\b/gi) ?? []).filter((w) => !new RegExp(`\\b${w}\\b`, "i").test(known));
+  if (scale.length) problems.push(`It has amounts not in the facts: ${[...new Set(scale)].join(", ")}.`);
+  // Links and addresses only come from the user, never from page text.
+  const links = [...(draft.subject + " " + draft.body).matchAll(/\bhttps?:\/\/\S+|\bwww\.\S+|[^\s@]+@[^\s@]+\.[^\s@]+/gi)].map((m) => m[0]);
+  if (links.length) problems.push(`It has a link or email address: ${links.join(", ")}.`);
   const used = facts.find((f) => f.id === companyFact);
-  if (!used || used.kind === "me") problems.push("It doesn't name which company fact it uses.");
+  // The lead fact must be about the company or a person's school or hometown.
+  if (!used || !(used.kind === "company" || (used.kind === "person" && used.hook))) {
+    problems.push("It doesn't name which company fact it uses.");
+  }
   return problems;
 }
 
 // Opens Gmail's compose window with the draft filled in. Nothing is sent:
-// the user reviews it there and presses Send themselves.
+// the user reviews it there and presses Send themselves. Spaces are encoded
+// as %20, not "+".
 export function gmailComposeUrl(draft: { to?: string | null; subject: string; body: string }): string {
-  const q = new URLSearchParams({ view: "cm", fs: "1" });
-  if (draft.to) q.set("to", draft.to);
-  q.set("su", draft.subject);
-  q.set("body", draft.body);
-  return `https://mail.google.com/mail/?${q.toString()}`;
+  const parts = ["view=cm", "fs=1"];
+  if (draft.to) parts.push(`to=${encodeURIComponent(draft.to)}`);
+  parts.push(`su=${encodeURIComponent(draft.subject)}`, `body=${encodeURIComponent(draft.body)}`);
+  return `https://mail.google.com/mail/?${parts.join("&")}`;
 }
+
+// Gmail rejects very long compose links; past this, offer Copy instead.
+export const GMAIL_URL_LIMIT = 1800;

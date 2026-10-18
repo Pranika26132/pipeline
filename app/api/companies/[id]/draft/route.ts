@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import type { NextRequest } from "next/server";
 
 import { draftFacts, HOOKS, type Hook } from "@/lib/drafts";
@@ -14,7 +15,9 @@ export const maxDuration = 60;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type DraftResponse =
-  | { ok: true; subject: string; body: string; fact: string; toTeam: boolean }
+  // `contactId`: who the draft is to (null for the team). `warning`: the
+  // draft was written but not saved; it's returned so it isn't lost.
+  | { ok: true; subject: string; body: string; fact: string; toTeam: boolean; contactId: string | null; warning?: string }
   | { ok: false; error: string };
 
 function fail(status: number, error: string) {
@@ -59,7 +62,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     contactId
       ? supabase
           .from("contacts")
-          .select("id, name, title, school, hometown, school_status, hometown_status")
+          .select("id, name, title, school, hometown, school_status, hometown_status, source_url, school_source_url, hometown_source_url, added_by_user")
           .eq("id", contactId)
           .eq("company_id", id)
           .maybeSingle()
@@ -75,12 +78,18 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   const company = companyResult.data;
   const contact = contactResult.data;
   const profile = profileResult.data;
-  // A researched school or hometown is only used when it's "stated".
-  const counts = (status: string | null) => !status || status === "stated";
+  // The same rule as scoring: a school or hometown is used only when it's
+  // "stated" (or not from research) and has a source link, or the user added it.
+  const counts = (status: string | null, source: string | null) =>
+    (!status || status === "stated") && (!!source || !!contact?.added_by_user);
   const facts = draftFacts({
     company,
     contact: contact
-      ? { ...contact, schoolCounts: counts(contact.school_status), hometownCounts: counts(contact.hometown_status) }
+      ? {
+          ...contact,
+          schoolCounts: counts(contact.school_status, contact.school_source_url ?? contact.source_url),
+          hometownCounts: counts(contact.hometown_status, contact.hometown_source_url ?? contact.source_url),
+        }
       : null,
     profile,
   });
@@ -99,12 +108,25 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
     });
   } catch (e) {
     // Our own check messages say what was wrong; API errors use fixed text.
-    return fail(502, `Couldn't write the draft. ${e instanceof BadModelOutputError ? e.message : describeModelError(e)}`);
+    const why =
+      e instanceof BadModelOutputError || e instanceof Anthropic.APIError
+        ? e instanceof BadModelOutputError
+          ? e.message
+          : describeModelError(e)
+        : "Something went wrong while writing. Try again.";
+    return fail(502, `Couldn't write the draft. ${why}`);
   }
 
   const saved = await saveDraft(supabase, id, { subject: written.subject, body: written.body, contactId: contact?.id ?? null });
-  if (saved.error) return fail(500, `Wrote a draft, but ${saved.error.charAt(0).toLowerCase()}${saved.error.slice(1)}`);
-
   const fact = facts.find((f) => f.id === written.companyFact)?.text ?? "";
-  return Response.json({ ok: true, subject: written.subject, body: written.body, fact, toTeam: !contact } satisfies DraftResponse);
+  return Response.json({
+    ok: true,
+    subject: written.subject,
+    body: written.body,
+    fact,
+    toTeam: !contact,
+    contactId: contact?.id ?? null,
+    // Not saved, but shown so it can be copied or saved with Save changes.
+    warning: saved.error ? redactSecrets(`Wrote a draft but couldn't save it. ${saved.error}`, [apiKey]) : undefined,
+  } satisfies DraftResponse);
 }

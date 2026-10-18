@@ -2,9 +2,10 @@ import type { createClient } from "./supabase/server";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
-// Saves the current draft on the company's newest outreach row (creating one
-// if there's none). A company still "to contact" becomes "drafted"; a later
-// status (sent, replied, …) is left alone. Nothing is ever sent.
+// Saves the current draft on the company's newest outreach row while it's
+// still "to contact" or "drafted" (it becomes "drafted"). Once an email was
+// sent (or later), a new draft is a new row, so what was sent is kept.
+// Nothing is ever sent.
 export async function saveDraft(
   supabase: Supabase,
   companyId: string,
@@ -27,11 +28,9 @@ export async function saveDraft(
   };
   // RLS and the outreach policies only allow the user's own company, and a
   // contact from that same company.
-  const { error } = latest
-    ? await supabase
-        .from("outreach")
-        .update({ ...fields, status: latest.status === "to_contact" ? "drafted" : latest.status })
-        .eq("id", latest.id)
+  const open = latest && (latest.status === "to_contact" || latest.status === "drafted");
+  const { error } = open
+    ? await supabase.from("outreach").update({ ...fields, status: "drafted" }).eq("id", latest.id)
     : await supabase.from("outreach").insert({ ...fields, company_id: companyId, status: "drafted" });
   if (error) return { error: `Couldn't save the draft (${error.message}).` };
   return {};
