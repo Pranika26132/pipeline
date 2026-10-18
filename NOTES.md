@@ -221,6 +221,22 @@ Known limits:
   - Facts that are shared or conflicting are researched again on the next run, and new sentences are merged with earlier ones. Search now looks up each person by name.
   - Migration `20261017223529_person_fact_status.sql` adds the status and evidence columns. It also cleared the one earlier research fact in the user's data (Rudy's Duke at turbo.ai), dropped its points and reset `researched_at`, so research runs again under the new rules.
   - Turbo AI retest (both founders known), run as the button does. Run 1: Rudy → Northwestern (stated); nothing found for Sarthak. Run 2: Sarthak → Duke University from a sentence about him alone (stated, +3), Rudy → Northwestern (stated), Rudy's Frisco hometown shared (not counted). Full flow from a bare turbo.ai: leader search found Rudy; his only Duke sentence was about both founders, so it was shared and not scored. A seeded conflict renders "Sources disagree" with both sources and "Not counted toward the score."
+- **Fix: only Rudy Arora was saved from "Founded by Sarthak Dhawan and Rudy Arora".**
+  - `founderNames` now reads founders from the quotes themselves, not only from the picker:
+    - the list after "founded by" or "co-founders";
+    - a role right next to a name ("The CEO of Turbo AI is Sarthak Dhawan", "Rudy Arora, co-founder of …", "founder and CEO Jane Doe");
+    - anyone in the same name list as a founder the picker named.
+  - Each name still has to pass `acceptLeaders`, and organization names (University, College, AI, Labs, …) are never people. A multi-person sentence is fine for who founded the company, just not for schools.
+  - The founder search also runs when the only saved founder was itself found by search. Once two or more founders are saved, the searches go to their schools and hometowns.
+  - "Look up again" now always runs founder research afterwards (anyone without a school or hometown is searched again), not only after finding new people.
+  - Timeout: a "Look up again" research call ran past the 35 s client timeout after several per-name searches. The search call now uses low effort, a 2500-token answer limit, an instruction to answer in short cited lines, and a 40 s timeout. 40 s plus the 15 s picker stays under the route's 60 s limit.
+  - Narrowed the "X and Y" group-sentence check to two names joined as the subject of a shared verb ("Arora and Dhawan were …"). Before, "Mathematics and Computer Science @ Duke University" counted as a group sentence.
+  - Turbo AI retest (bare turbo.ai, lookup then "Look up again" a minute later, as the button runs it):
+    - Both founders were saved from one founder sentence (Yahoo, and in another run kfor.com).
+    - Rudy Arora → Northwestern University (stated).
+    - Research took 13–19 s; no timeouts.
+    - Sarthak Dhawan's school was not saved in these runs. The Duke sources the searches returned were first-person ("I got into Duke University" in an interview; his own blog post on turbo.ai) or RocketReach (blocked). A first-person quote doesn't name him, so it isn't used.
+    - One earlier run found a sentence about him alone on Starter Story and scored Duke +3. Results depend on what each search returns.
 - **Next on the queue:** `feature/fit`. About me (graduation year, degree and major, resume pasted or uploaded as a PDF up to 5 MB through Claude's PDF input; text only is stored), and role fit judged by Claude with "unclear" when unsure.
 
 ## Decisions
