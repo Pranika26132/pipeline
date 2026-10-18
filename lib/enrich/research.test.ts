@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { aboutOnly, acceptFacts, acceptLeaders, mentionsCompany, resolveFact, type Quote, type ResearchPerson } from "./research";
+import { aboutOnly, acceptFacts, acceptLeaders, founderNames, mentionsCompany, resolveFact, type Quote, type ResearchPerson } from "./research";
 
 const people: ResearchPerson[] = [
   { key: "a", name: "Sarthak Dhawan", title: "Co-founder", needSchool: true, needHometown: true },
@@ -64,6 +64,10 @@ describe("acceptFacts", () => {
     expect(aboutOnly("Jane Doe graduated from the College of William and Mary.", "Jane Doe", "College of William and Mary", [])).toBe(true);
     expect(aboutOnly("Jane Doe and John Roe both went to Duke.", "Jane Doe", "Duke", [])).toBe(false);
     expect(aboutOnly("They met at Duke, where Jane Doe studied math.", "Jane Doe", "Duke", [])).toBe(false);
+    // Capitalized subject names joined by "and" aren't people.
+    expect(
+      aboutOnly("Sarthak Dhawan holds a Bachelor's degree in Mathematics and Computer Science @ Duke University.", "Sarthak Dhawan", "Duke University", ["Rudy Arora"]),
+    ).toBe(true);
   });
 
   it("counts a part of a sentence that's clearly about one person", () => {
@@ -196,6 +200,38 @@ describe("acceptLeaders", () => {
     ];
     expect(acceptLeaders([{ name: "Rudy Arora", role: "co-founder", quote: 1 }], q, turbo, [])).toHaveLength(1);
     expect(acceptLeaders([{ name: "Rudy Arora", role: "co-founder", quote: 2 }], q, turbo, [])).toEqual([]);
+  });
+
+  it("saves every founder a founder sentence names, even if the picker listed one", () => {
+    const q: Quote[] = [
+      {
+        text: "Founded by Sarthak Dhawan and Rudy Arora, Turbo AI now has 5 million users.",
+        url: "https://finance.yahoo.com/news/turbo-ai-champions-human-first-201600455.html",
+      },
+      { text: "Turbo AI co-founders Rudy Arora, Sarthak Dhawan and Jane Smith spoke.", url: "https://a.example/5" },
+      {
+        text: "The startup Turbo AI, co-founded by Rudy Arora and former Duke University student Sarthak Dhawan, helps students.",
+        url: "https://a.example/6",
+      },
+    ];
+    const pickerSaw = [{ name: "Rudy Arora", role: "co-founder", quote: 1 }];
+    const names = (quote: number) =>
+      acceptLeaders([...pickerSaw, ...founderNames(q, pickerSaw)].filter((l) => l.quote === quote), q, turbo, []).map((l) => l.name);
+    expect(names(1)).toEqual(["Rudy Arora", "Sarthak Dhawan"]);
+    expect(acceptLeaders(founderNames(q, []), q, turbo, []).map((l) => l.name)).toEqual(
+      expect.arrayContaining(["Sarthak Dhawan", "Rudy Arora", "Jane Smith"]),
+    );
+    const phrasings: Quote[] = [
+      { text: "The CEO of Turbo AI is Sarthak Dhawan.", url: "https://getlatka.com/companies/turbo.ai" },
+      { text: "Rudy Arora, co-founder of Turbo AI, spoke on Monday.", url: "https://a.example/7" },
+      { text: "Jane Smith, an investor in Turbo AI alongside founder Rudy Arora, spoke.", url: "https://a.example/8" },
+    ];
+    const got = acceptLeaders(founderNames(phrasings, []), phrasings, turbo, []).map((l) => `${l.name}: ${l.title}`);
+    expect(got).toEqual(expect.arrayContaining(["Sarthak Dhawan: CEO", "Rudy Arora: Co-founder"]));
+    expect(founderNames(phrasings, []).map((l) => l.name)).not.toContain("Jane Smith");
+    // "Duke University" is never a founder, wherever it sits.
+    expect(founderNames(q, []).map((l) => l.name)).not.toContain("Duke University");
+    expect(acceptLeaders([{ name: "Duke University", role: "founder", quote: 3 }], q, turbo, [])).toEqual([]);
   });
 
   it("recognizes the company by name, website, or website label", () => {
