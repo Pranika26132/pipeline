@@ -411,6 +411,10 @@ Known limits:
   - person rows from Find are merged regardless of capitalization.
 - **Trade-off:** "Toronto, CA" now matches a "San Jose, CA" hometown, because a code written the same way as the user's is read as the same state.
 
+## Feature freeze (2026-10-18)
+- Merged #19 and #20 (the Find button, Find connections with quotes, Nearby factor). `main` builds, lint passes, and 201 tests pass.
+- README rewritten from the create-next-app text. Region matching is listed as a known limitation in README and SPEC.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
@@ -418,7 +422,5 @@ Known limits:
 - Use Geist as the font (removed the Arial override rather than dropping the Geist imports).
 
 ## Open questions
-- README.md is still the create-next-app text. Replace it, and with what?
 - `npm audit`: 5 high (`braces` through `eslint-config-next`, dev only). The suggested fix downgrades to eslint-config-next 14, so it is not applied.
 - Leaked Password Protection: Requires a paid Supabase plan; left off on the free tier.
-- No column for score weights yet. Add with the scoring step.
