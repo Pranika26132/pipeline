@@ -88,8 +88,9 @@ A role fits only if all of these hold:
 - The student's major, degree and resume plausibly match what it asks for. When the role states requirements the profile clearly doesn't meet, it doesn't fit.
 
 When the text doesn't say enough to decide, answer "unclear". Never guess; never use outside knowledge about the company.
-If a role's dates (such as "Summer 2026") are before today's date, answer "no_fit" and say the dates have passed.
+Dates: a role whose dates (such as "Summer 2026") are already over by today's date doesn't fit. Dates still ahead are fine; don't mention them.
 
+Write the reason first, then the verdict that follows from it: a reason that says the role fits must have the verdict "fits".
 The reason is one plain sentence under 20 words that says why, naming the role's level and what in the profile it matches or misses, for example "Software engineering internship; fits your CS major and class of 2028." or "Asks for 5+ years of experience." or "Level isn't stated, so it's unclear whether students can apply."`;
 
 const SCHEMA = {
@@ -102,11 +103,12 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["index", "verdict", "reason"],
+        // The reason comes before the verdict, so the verdict follows from it.
+        required: ["index", "reason", "verdict"],
         properties: {
           index: { type: "integer" },
-          verdict: { type: "string", enum: ["fits", "no_fit", "unclear"] },
           reason: { type: "string" },
+          verdict: { type: "string", enum: ["fits", "no_fit", "unclear"] },
         },
       },
     },
