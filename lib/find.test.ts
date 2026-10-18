@@ -69,3 +69,10 @@ describe("mergeVerified", () => {
     expect(leftOut).toEqual(["B: its home page doesn't say what it does.", "C: doesn't meet your request. Based in Ohio, not NYC."]);
   });
 });
+
+describe("urlKey across scheme and www", () => {
+  it("treats http/https and www as the same page, keeping the query", () => {
+    expect(urlKey("http://www.News.test/a/?id=1")).toBe(urlKey("https://news.test/a?id=1"));
+    expect(urlKey("https://news.test/a?id=1")).not.toBe(urlKey("https://news.test/a?id=2"));
+  });
+});

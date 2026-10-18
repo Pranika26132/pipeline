@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { NextRequest } from "next/server";
 
 import { describeModelError } from "@/lib/enrich/errors";
@@ -14,9 +13,12 @@ import {
 import { API_KEY_MESSAGE, isWellFormedApiKey, redactSecrets } from "@/lib/redact";
 import { createClient } from "@/lib/supabase/server";
 
-// Up to 10 web searches (about 60 s), home page reads (up to ~16 s), then one
-// short model call.
+// Up to 10 web searches (about 55 s), home page reads (capped at 20 s), then
+// one short model call, all inside one deadline. 120 s needs Vercel's Fluid
+// compute (on by default for new projects).
 export const maxDuration = 120;
+// Leaves room to answer before the platform stops the function.
+const BUDGET_MS = 108_000;
 
 const PAGE = 1000;
 
@@ -58,19 +60,28 @@ export async function POST(req: NextRequest) {
 
   // One Find at a time per user, claimed in the database so two tabs can't
   // both start one. A claim older than 3 minutes has expired.
-  const { data: claimed, error: claimError } = await supabase.rpc("claim_find_slot");
+  // The token stays on the server, so only this request can free the slot.
+  const deadline = Date.now() + BUDGET_MS;
+  const { data: token, error: claimError } = await supabase.rpc("claim_find_slot");
   if (claimError) return fail(500, `Couldn't start the search (${claimError.message}).`);
-  if (!claimed) return fail(429, "A Find is already running for you, maybe in another tab. Wait for it to finish, then try again.");
-
-  try {
-    return await find(supabase, apiKey, request);
-  } finally {
-    // Frees the slot; if this fails, the claim simply expires after 3 minutes.
-    await supabase.from("find_locks").update({ started_at: null }).eq("user_id", auth.claims.sub);
+  if (!token) {
+    return fail(429, "A Find is already running for you (maybe in another tab), or one stopped less than 3 minutes ago. Wait for it to finish, then try again.");
   }
+
+  const response = await find(supabase, apiKey, request, deadline);
+  const released = await supabase.rpc("release_find_slot", { claim: token });
+  if (released.error || released.data !== true) {
+    // Shown with the results: the next Find may be refused for up to 3 minutes.
+    const note = `Couldn't free your Find slot${released.error ? ` (${released.error.message})` : ""}, so the next Find may have to wait up to 3 minutes.`;
+    const body = (await response.json()) as FindResponse;
+    return Response.json(body.ok ? { ...body, notes: [...body.notes, note] } : { ...body, error: `${body.error}\n${note}` }, {
+      status: response.status,
+    });
+  }
+  return response;
 }
 
-async function find(supabase: Awaited<ReturnType<typeof createClient>>, apiKey: string, request: string) {
+async function find(supabase: Awaited<ReturnType<typeof createClient>>, apiKey: string, request: string, deadline: number) {
   // RLS returns only the user's own profile and companies.
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -86,9 +97,11 @@ async function find(supabase: Awaited<ReturnType<typeof createClient>>, apiKey: 
   }
 
   try {
-    const searched = await searchCandidates(apiKey, request, profile as FindProfile | null, 60_000);
-    const { checked, leftOut } = await checkCandidates(searched.candidates, searched.resultUrls, existing);
-    const verified = await verifyCompanies(apiKey, request, profile as FindProfile | null, checked, 25_000);
+    const searched = await searchCandidates(apiKey, request, profile as FindProfile | null, Math.min(55_000, deadline - Date.now() - 35_000));
+    const { checked, leftOut } = await checkCandidates(searched.candidates, searched.resultUrls, existing, Math.min(20_000, deadline - Date.now() - 15_000));
+    const verifyTime = Math.min(25_000, deadline - Date.now());
+    if (checked.length > 0 && verifyTime < 8_000) return fail(504, "Couldn't find companies. The search ran out of time. Try a narrower request.");
+    const verified = await verifyCompanies(apiKey, request, profile as FindProfile | null, checked, verifyTime);
     return Response.json({
       ok: true,
       companies: verified.companies,
@@ -97,12 +110,8 @@ async function find(supabase: Awaited<ReturnType<typeof createClient>>, apiKey: 
       notes: searched.notes,
     } satisfies FindResponse);
   } catch (e) {
-    const why =
-      e instanceof BadModelOutputError
-        ? e.message
-        : e instanceof Anthropic.APIError
-          ? describeModelError(e)
-          : "Something went wrong while searching. Try again.";
+    // Fixed messages only, never the raw error text.
+    const why = e instanceof BadModelOutputError ? e.message : describeModelError(e);
     return fail(502, `Couldn't find companies. ${why}`);
   }
 }

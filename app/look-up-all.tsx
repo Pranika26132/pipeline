@@ -45,6 +45,8 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
   const runningRef = useRef(false);
   // The run's targets; Find can add to it while it runs.
   const queueRef = useRef<Target[]>([]);
+  // Queued by Find while a run was stopping.
+  const afterStopRef = useRef<Target[]>([]);
   const startRef = useRef<(targets: Target[]) => void>(() => {});
 
   // Leaving the page stops the run after the current lookup.
@@ -53,9 +55,12 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
   useEffect(() => {
     const onQueue = (e: Event) => {
       const added = (e as CustomEvent<Target[]>).detail ?? [];
-      if (runningRef.current) {
+      if (runningRef.current && !stopRef.current) {
         const known = new Set(queueRef.current.map((t) => t.id));
         queueRef.current.push(...added.filter((t) => !known.has(t.id)));
+      } else if (runningRef.current) {
+        // Stopping: these start their own run once the current lookup ends.
+        afterStopRef.current.push(...added);
       } else if (added.length > 0) startRef.current(added);
     };
     window.addEventListener(QUEUE_LOOKUP_EVENT, onQueue);
@@ -133,6 +138,9 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
     }
     update({ current: null, finished: true });
     runningRef.current = false;
+    const next = afterStopRef.current;
+    afterStopRef.current = [];
+    if (next.length > 0) void start(next);
   }
 
   useEffect(() => {
