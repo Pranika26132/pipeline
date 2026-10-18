@@ -102,6 +102,46 @@ export async function collectPages(startUrl: string, domain: string): Promise<Co
   return { pages, problems };
 }
 
+// Reads only a site's home page, with the same checks as collectPages
+// (robots.txt, same site on every redirect hop). Used by Find to confirm a
+// company's website responds and to see what it says. Resolves to the text,
+// or to a plain reason it couldn't be read.
+// A redirect to another site (a company that moved to a new domain) comes
+// back as `movedTo`, so the caller can check that site instead.
+export async function readHomePage(
+  startUrl: string,
+  domain: string,
+): Promise<{ page: PageText } | { problem: string } | { movedTo: string }> {
+  const home = new URL(startUrl);
+  home.pathname = "/";
+  home.search = "";
+  home.hash = "";
+  const robotsByHost = new Map<string, Promise<Robots>>();
+  try {
+    const res = await safeFetch(home.href, {
+      async beforeRequest(url) {
+        if (!onDomain(url.hostname, domain)) throw new MovedError(url.href);
+        if (!robotsByHost.has(url.origin)) robotsByHost.set(url.origin, loadRobots(url));
+        const robots = await robotsByHost.get(url.origin)!;
+        if (robots.error) throw new SkipError(robots.error);
+        if (!robots.allows(url.pathname + url.search)) throw new SkipError("Its robots.txt asks bots not to read it.");
+      },
+    });
+    if (res.status >= 400) return { problem: `The site answered ${res.status}.` };
+    if (!res.contentType.includes("text/html") && !res.contentType.includes("text/plain")) {
+      return { problem: `It isn't a web page (${res.contentType || "unknown type"}).` };
+    }
+    const text = htmlToText(res.body).slice(0, MAX_TEXT_PER_PAGE);
+    if (!text.trim()) return { problem: "Its home page has no readable text." };
+    return { page: { url: res.url, text } };
+  } catch (e) {
+    if (e instanceof MovedError) return { movedTo: e.message };
+    return { problem: e instanceof SkipError ? e.message : describeFetchError(e) };
+  }
+}
+
+class MovedError extends Error {}
+
 function onDomain(host: string, domain: string) {
   const h = host.toLowerCase().replace(/\.+$/, "").replace(/^www\./, "");
   return h === domain || h.endsWith(`.${domain}`);

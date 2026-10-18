@@ -17,7 +17,7 @@ export const FOUNDER_SEARCHES = 1;
 export const MAX_SEARCHES = 3;
 // Never searched or cited: LinkedIn (CLAUDE.md) and people-data sites built
 // largely from LinkedIn profiles, whose terms forbid this kind of use.
-const BLOCKED_DOMAINS = [
+export const BLOCKED_DOMAINS = [
   "linkedin.com",
   "lnkd.in",
   "rocketreach.co",
