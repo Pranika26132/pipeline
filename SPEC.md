@@ -10,7 +10,7 @@ Me first. Other Duke students second (requirement: someone other than me can use
 2. **Enrich**: a serverless function fetches the company's public pages (about, team, careers) and asks Claude to extract: what they do, size/stage, roles open, founders/team names with background if stated on the page. Then **founder research** (see below) looks for each person's school and hometown on other public pages.
 3. **Tag and score**: each company gets tags and a "reply likelihood" score from my filters.
 4. **Draft**: pick a target, pick a contact, generate a cold email in my voice, edit it, copy it or open it as a Gmail draft.
-5. **Track**: status per target (to contact, drafted, sent, replied, interview, rejected, ghosted) plus follow-up date.
+5. **Track**: status per target (to contact, drafted, sent, replied, interview, rejected, ghosted) plus follow-up date. Built: set on the company page; a follow-up draft after sending keeps the status; the list shows the status and a follow-up badge.
 
 ## Filters and scoring (the part that makes it mine)
 Each user sets a profile once: school, hometown/region, interests (tech, quant), target roles.

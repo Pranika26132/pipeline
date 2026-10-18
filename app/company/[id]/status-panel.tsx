@@ -2,7 +2,9 @@
 
 import { useActionState, useState } from "react";
 
-import { STATUSES } from "@/lib/list-filters";
+import { CONTACTED, STATUSES, type Status } from "@/lib/list-filters";
+
+import { LocalDate } from "../../local-date";
 
 import { saveStatus, type StatusState } from "./actions";
 
@@ -12,11 +14,14 @@ export function StatusPanel({
   status,
   followUpOn,
   sentAt,
+  isFollowUp,
 }: {
   companyId: string;
   status: string;
   followUpOn: string | null;
   sentAt: string | null;
+  // A follow-up draft on this row hasn't been marked sent yet.
+  isFollowUp: boolean;
 }) {
   const [picked, setPicked] = useState(status);
   const [date, setDate] = useState(followUpOn ?? "");
@@ -52,10 +57,24 @@ export function StatusPanel({
           ))}
         </div>
       </fieldset>
-      {sentAt && (
+      {sentAt && CONTACTED.has(status as Status) && (
         <p className="text-base text-muted">
-          Marked sent on {new Date(sentAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}.
+          Marked sent on <LocalDate iso={sentAt} />.
         </p>
+      )}
+      {isFollowUp && (
+        <div className="flex flex-col gap-2 rounded-md border border-rule px-4 py-3">
+          <p className="text-base">You have a follow-up draft that isn’t marked sent yet.</p>
+          <button
+            type="submit"
+            name="followUpSent"
+            value="1"
+            disabled={pending}
+            className="min-h-12 w-fit rounded-lg border-2 border-foreground px-4 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60"
+          >
+            Mark follow-up sent
+          </button>
+        </div>
       )}
       <label className="flex flex-col gap-2">
         <span className="text-base font-medium">

@@ -15,7 +15,8 @@ export function FollowUpBadge({ date }: { date: string }) {
     () => "",
   );
   const [y, m, d] = date.split("-").map(Number);
-  const label = new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  // A fixed locale, so the server and the browser render the same text.
+  const label = new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   if (!today) return <span className="rounded-sm border border-rule px-2 py-0.5 text-sm text-muted">Follow up {label}</span>;
   const due = date <= today;
   return (

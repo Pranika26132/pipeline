@@ -63,7 +63,7 @@ async function Company({ id }: { id: string }) {
       .order("name"),
     supabase
       .from("outreach")
-      .select("subject, draft, contact_id, status, follow_up_on, sent_at")
+      .select("subject, draft, contact_id, status, follow_up_on, sent_at, is_follow_up")
       .eq("company_id", id)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -140,10 +140,14 @@ async function Company({ id }: { id: string }) {
           <Alert>Couldn’t load the status ({draftResult.error.message}). Reload to try again.</Alert>
         ) : (
           <StatusPanel
+            // Remounts when the saved status changes (e.g. a draft made it
+            // "drafted"), so the panel never saves a stale choice back.
+            key={`${draftResult.data?.status}|${draftResult.data?.follow_up_on}|${draftResult.data?.sent_at}|${draftResult.data?.is_follow_up}`}
             companyId={company.id}
             status={draftResult.data?.status ?? "to_contact"}
             followUpOn={draftResult.data?.follow_up_on ?? null}
             sentAt={draftResult.data?.sent_at ?? null}
+            isFollowUp={!!draftResult.data?.is_follow_up}
           />
         )}
       </section>
