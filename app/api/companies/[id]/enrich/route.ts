@@ -7,6 +7,7 @@ import { looksLikeDomain } from "@/lib/domain";
 import { describeFetchError } from "@/lib/enrich/safe-fetch";
 import { API_KEY_MESSAGE, isWellFormedApiKey, redactSecrets } from "@/lib/redact";
 import { canCheckFit } from "@/lib/fit";
+import { mergeLocations, withoutLookupRoles } from "@/lib/locations";
 import { rescore } from "@/lib/rescore";
 import { judgeRoles, loadFitProfile } from "@/lib/role-fit-run";
 import { createClient } from "@/lib/supabase/server";
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   // RLS returns nothing for another user's company.
   const { data: company, error: loadError } = await supabase
     .from("companies")
-    .select("id, name, url, domain, summary, stage, size, field_sources, open_roles, facts_version")
+    .select("id, name, url, domain, summary, stage, size, field_sources, open_roles, facts_version, locations")
     .eq("id", id)
     .maybeSingle();
   if (loadError) return fail(500, `Couldn't load the company (${loadError.message}).`);
@@ -209,6 +210,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       size: result.size?.value ?? company.size,
       field_sources: fieldSources,
       open_roles: roles,
+      // Added to what's saved (by Find or earlier lookups), never replacing it.
+      locations: mergeLocations(withoutLookupRoles(company.locations), result.locations),
       ...roleFit,
       // Flagged while the company has nobody to write to.
       needs_manual_info: existing.length + fresh.length === 0,

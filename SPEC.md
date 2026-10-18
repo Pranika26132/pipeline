@@ -14,10 +14,11 @@ Me first. Other Duke students second (requirement: someone other than me can use
 
 ## Filters and scoring (the part that makes it mine)
 Each user sets a profile once: school, hometown/region, interests (tech, quant), target roles.
-On /profile the weights below are set under a collapsed "Customize ranking" section as three choices per factor: "Doesn't matter" (0), "Matters", "Matters a lot". Points per choice: school, hometown and open role 0 / 2 / 3; early stage 0 / 1 / 2. The defaults ("Matters a lot" for school, "Matters" for the rest) give the points below.
+On /profile the weights below are set under a collapsed "Customize ranking" section as three choices per factor: "Doesn't matter" (0), "Matters", "Matters a lot". Points per choice: school, hometown and open role 0 / 2 / 3; nearby and early stage 0 / 1 / 2. The defaults ("Matters a lot" for school, "Matters" for the rest) give the points below.
 Score is a plain weighted sum I can see and change, not a black box:
 - Founder or team member went to my school: +3
 - Founder or team member from my hometown/region: +2
+- **Nearby:** an office, HQ or role location in my hometown or region (same place, or same state as my city), from a page with its source (a lookup's office sentence or role location, or a Find quote): +1
 - Company has a matching open role: +2
 - Early stage (under ~50 people): +1
 - Already contacted: excluded by default
@@ -45,13 +46,21 @@ Every score shows its reasons ("Founder went to Duke: found on /about page") wit
 
 ## Find companies (`feature/find`; replaces Discover, which is cut)
 A way to find new targets without leaving the app.
-- A **Find companies** box on `/`: type a request in plain English ("early-stage quant firms in NYC hiring interns"). The profile (target roles, interests, major, class year, school, hometown) is sent with it.
+- A **Find companies** button next to "Add companies" on `/` opens a box: type a request in plain English ("early-stage quant firms in NYC hiring interns"). The profile (target roles, interests, major, class year, school, hometown) is sent with it.
 - `/api/find`: Claude (Haiku) with the web search tool, at most 10 searches per request (about 10 to 20 cents, shown under the box), LinkedIn and people-data sites blocked. It proposes up to 12 companies: name, website, why, and the search result it was found in.
 - **Nothing invented.** A company is shown only when all of these hold:
   - its source is a URL the search tool actually returned;
   - its website is a company site (not a directory, job board or LinkedIn) and isn't already in the list (dedupe on domain);
   - its home page responds through the same safe fetch and robots.txt rules as lookups (a site that moved to a new domain is checked there) and names the company;
   - a second Haiku call, reading that page, confirms it describes the company and doesn't contradict the request. The one-line description and "why it matches" come from that page and the search result. Requirements the page doesn't confirm (like hiring interns) are said to be unconfirmed.
+- **Connections need a quote.** A school, hometown or office connection is shown only with the exact sentence and its page, under the same rules as founder research:
+  - the sentence is verbatim on the company's fetched home page (start or footer) or in a web-search citation;
+  - it names the school or place;
+  - for a person, it is about that person alone;
+  - it matches my profile (an office may instead be in a place the request names; only my own region adds points).
+
+  "Why it matches" may not mention my hometown, region or school without a quoted connection backing it; otherwise that line is dropped.
+- **Saved on Add.** A founder's school or hometown becomes a person fact ("stated", with quote and source); an office becomes a company location. The company is scored right away, before its lookup; the list shows that score as "so far, not looked up", and the company page shows its reasons and sources. Lookups and founder research only add to these, never erase them.
 - Results show as a checklist (all ticked): company, website, one-line description, why it matches, and "Found on …" linking to the source. "Add all N", or untick rows and "Add N selected". Everything left out is listed with the reason.
 - **Nothing is added without a click.** Adding goes through the same checks as `/add` (`source` = `find:<request>`). The added companies queue straight into Look up all (or join a run in progress) and are scored as each lookup finishes.
 - **One Find at a time per user**, claimed in the database (`find_locks`, `claim_find_slot()`; a claim expires after 3 minutes). A second one gets a clear error. Every other error (no results, API, timeouts, a cut-off answer) is shown in the box.

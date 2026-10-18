@@ -15,4 +15,16 @@ export type FoundCompany = {
   why: string;
   // The search result the company was found in.
   source_url: string;
+  // Matches with your school, hometown or region, each with the exact
+  // sentence and the page it's on. Only these are shown as connections.
+  connections: FindConnection[];
+};
+
+// A founder's school or hometown (`person` set), or an office/HQ location.
+export type FindConnection = {
+  kind: "school" | "hometown" | "office";
+  value: string;
+  person: string | null;
+  quote: string;
+  source_url: string;
 };

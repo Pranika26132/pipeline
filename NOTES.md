@@ -365,6 +365,52 @@ Known limits:
   - no sideways scrolling on `/`, `/add`, a company page or `/profile`;
   - tapping Sign out landed on `/login`, and `/profile` afterwards redirected to `/login`.
 
+## Finished (branch `feature/find-entry`, 2026-10-18)
+- "Add companies" and "Find companies" sit side by side on `/` (`app/home-actions.tsx`). Find opens the search box under them and focuses it. The box stays mounted once opened, so closing and reopening keeps the request and the results. The box's own button now says "Search".
+- **Tested at 390 and 360 px** in headless Chrome:
+  - both labels fit on one line (the text is a step smaller under 400 px);
+  - a tap opens the box with the text field focused;
+  - there's no sideways scroll.
+- **Fresh-context review fixes:**
+  - the panel's container is always in the page, so the button's `aria-controls` has a target;
+  - closing the box mid-search no longer hides the outcome: the button reads "Searching…" or "Adding…" while one runs, and the box reopens when it finishes, showing the results or the error.
+
+## Finished (branch `polish/final`, 2026-10-18; built on `feature/find-entry`)
+- **Bug:** Find's "why it matches" showed a Minnesota connection. After Add, the lookup found none and the score didn't count it. "Why" was free text written by the model from the search step's unchecked note, and nothing from Find was saved with the company.
+- **Find:**
+  - The verify call returns `connections` (`school` / `hometown` / `office`, value, person, quote).
+  - `acceptConnections` keeps one only if:
+    - the quote is verbatim on the fetched home page (top plus footer) or in a web-search citation;
+    - the quote names the value;
+    - for a person fact, it passes founder research's `aboutOnly`;
+    - it matches the profile (an office may instead be in a place the request names).
+  - `withBackedWhy` drops a "why" that names the user's hometown, region or school with no connection backing it. The search step's note is never shown.
+- **Add:**
+  - `addFromFind` re-checks each connection from the browser: its kind, a quote that names the value and the person, and an http(s) source.
+  - Offices go into `companies.locations`; person facts become contacts with `*_status = 'stated'`, the quote and evidence. The company is then rescored.
+  - `rescore` now scores a company that hasn't been looked up when it already has sourced facts (people, locations, or a CSV tag). Before this, CSV-tagged companies waited for their lookup.
+- **Lookups:**
+  - extraction also returns offices with an exact sentence (checked on the page), and role locations that appear on the role's page;
+  - `mergeLocations` adds to what's saved, never removes;
+  - Find's contacts are kept (lookups only add new names, and research only fills empty facts).
+- **Nearby factor** (`region`): an office, HQ or role location in the profile's place or state (`regionsMatch`; ambiguous codes like "Toronto, CA" aren't read as states; a bare city doesn't count). Weight `weight_region` defaults to 1. There's a "Nearby" filter chip and a Locations row on the company page.
+- **Migration:** `20261018204943_company_locations_and_region_weight.sql`. No new policies.
+- **Tested live** (throwaway users, deleted):
+  - "tech startups with a Minnesota connection hiring software engineering interns" showed Onsetto with an office quote from start-midwest.com. Other results' unbacked "Minneapolis…" reasons were blank.
+  - Add scored it right away (Nearby +1, with source). The lookup kept the location and the point, and added Early stage +1.
+  - A direct Add with three quoted connections scored 6 (school 3, hometown 2, nearby 1), and a forged one with no real quote and a `javascript:` link was dropped.
+
+- **Fresh-context review fixes:**
+  - a search quote must name this company, so a list article's line about another company or founder isn't credited to it;
+  - the company page and the list now show a score from saved quotes before the lookup ("so far, not looked up", with its reasons and sources);
+  - region matching ignores zip codes and street numbers, treats "MA" written like the user's own code as the same state, reads the state after the city (Washington, DC isn't Washington), and doesn't treat a country as a region;
+  - office quotes need office wording or an address ("we serve customers across Minnesota" doesn't count), both in Find and in lookups;
+  - each lookup replaces its own role locations, so a closed role stops counting;
+  - "why" checks also catch the school's short name and any US state, but not two-letter codes like "in";
+  - an ellipsis inside a quote is refused (a trailing one from a citation is fine);
+  - person rows from Find are merged regardless of capitalization.
+- **Trade-off:** "Toronto, CA" now matches a "San Jose, CA" hometown, because a code written the same way as the user's is read as the same state.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.

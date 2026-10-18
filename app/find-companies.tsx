@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { FIND_COST_NOTE, FIND_MAX_SEARCHES, FIND_REQUEST_MAX, type FoundCompany } from "@/lib/find-limits";
+import { FIND_COST_NOTE, FIND_MAX_SEARCHES, FIND_REQUEST_MAX, type FindConnection, type FoundCompany } from "@/lib/find-limits";
 
 import { addFromFind, type AddState } from "./add/actions";
 import type { FindResponse } from "./api/find/route";
@@ -18,7 +18,17 @@ type Results = { request: string; companies: FoundCompany[]; searches: number; l
 
 // "Find companies": Claude searches the web for companies matching a request.
 // Results are a checklist; nothing is added until the user taps Add.
-export function FindCompanies() {
+// `onBusy` reports a running search or add; `onDone` fires when one finishes,
+// so a closed box can reopen to show the results or the error.
+export function FindCompanies({
+  inputRef,
+  onBusy,
+  onDone,
+}: {
+  inputRef?: React.Ref<HTMLTextAreaElement>;
+  onBusy?: (busy: "searching" | "adding" | null) => void;
+  onDone?: () => void;
+}) {
   const router = useRouter();
   const [, startRefresh] = useTransition();
   const [request, setRequest] = useState("");
@@ -33,6 +43,7 @@ export function FindCompanies() {
     e.preventDefault();
     if (searching) return;
     setSearching(true);
+    onBusy?.("searching");
     setError(null);
     setAdded(null);
     let body: FindResponse | null = null;
@@ -49,6 +60,8 @@ export function FindCompanies() {
       body = { ok: false, error: `Couldn't reach the server (${(err as Error).message}). Check your connection.` };
     }
     setSearching(false);
+    onBusy?.(null);
+    onDone?.();
     if (!body.ok) {
       setError(body.error);
       return;
@@ -62,13 +75,21 @@ export function FindCompanies() {
     const picked = results.companies.filter((c) => ticked.has(c.domain));
     if (picked.length === 0) return;
     setAdding(true);
+    onBusy?.("adding");
     let state: AddState;
     try {
-      state = await addFromFind(picked.map((c) => ({ name: c.name, url: c.url })), results.request);
+      // The quoted connections are saved with each company, so its score
+      // counts them before the lookup finishes.
+      state = await addFromFind(
+        picked.map((c) => ({ name: c.name, url: c.url, connections: c.connections })),
+        results.request,
+      );
     } catch {
       state = { error: "Couldn't reach the server, so nothing was added. Try again." };
     }
     setAdding(false);
+    onBusy?.(null);
+    onDone?.();
     setAdded(state);
     if (state.added?.length) {
       // Added companies go straight into Look up all and get scored.
@@ -83,13 +104,15 @@ export function FindCompanies() {
 
   return (
     <section aria-labelledby="find" className="flex flex-col gap-4 rounded-lg border-2 border-foreground p-4">
-      <h2 id="find" className="text-2xl font-semibold tracking-[-0.02em]">
+      {/* The "Find companies" button above the box already names it. */}
+      <h2 id="find" className="sr-only">
         Find companies
       </h2>
       <form onSubmit={find} className="flex flex-col gap-3">
         <label className="flex flex-col gap-2">
           <span className="text-base text-muted">Say what you’re looking for. Your profile is used too.</span>
           <textarea
+            ref={inputRef}
             value={request}
             onChange={(e) => setRequest(e.target.value)}
             rows={2}
@@ -99,7 +122,7 @@ export function FindCompanies() {
           />
         </label>
         <button type="submit" disabled={searching || request.trim().length < 3} aria-busy={searching} className={primary}>
-          {searching ? "Searching…" : "Find companies"}
+          {searching ? "Searching…" : "Search"}
         </button>
         <p className="text-sm text-muted">
           {searching
@@ -161,9 +184,22 @@ export function FindCompanies() {
                       <span className="flex min-w-0 flex-col gap-1">
                         <span className="text-lg font-semibold wrap-anywhere">{c.name}</span>
                         <span className="text-base wrap-anywhere">{c.description}</span>
-                        <span className="text-base text-muted wrap-anywhere">{c.why}</span>
+                        {c.why && <span className="text-base text-muted wrap-anywhere">{c.why}</span>}
                       </span>
                     </label>
+                    {c.connections.length > 0 && (
+                      <ul className="flex flex-col gap-2 pb-2 pl-9">
+                        {c.connections.map((k, i) => (
+                          <li key={i} className="flex flex-col gap-1 border-l-2 border-accent pl-3 text-base">
+                            <span className="font-semibold">{connectionLabel(k)}</span>
+                            <q className="text-muted wrap-anywhere">{k.quote}</q>
+                            <a href={k.source_url} target="_blank" rel="noopener noreferrer" className="flex min-h-12 w-fit items-center text-muted underline underline-offset-4 wrap-anywhere">
+                              Source: {hostOf(k.source_url)}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     {/* Links sit outside the label so tapping them doesn't untick the row. */}
                     <p className="flex flex-wrap gap-x-4 pb-3 pl-9 text-base">
                       <a href={c.url} target="_blank" rel="noopener noreferrer" className="flex min-h-12 items-center underline underline-offset-4 wrap-anywhere">
@@ -202,6 +238,11 @@ export function FindCompanies() {
       )}
     </section>
   );
+}
+
+function connectionLabel(k: FindConnection) {
+  if (k.kind === "office") return `Office in ${k.value}`;
+  return k.kind === "school" ? `${k.person} went to ${k.value}` : `${k.person} is from ${k.value}`;
 }
 
 function hostOf(url: string) {

@@ -20,7 +20,7 @@ import type { Factor, Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
 import { FollowUpBadge } from "./follow-up-badge";
-import { FindCompanies } from "./find-companies";
+import { HomeActions } from "./home-actions";
 import { LookUpAll } from "./look-up-all";
 import { TopBar } from "./top-bar";
 
@@ -150,13 +150,7 @@ async function TargetList({ filters }: { filters: Filters }) {
               : `${companies.length} ${companies.length === 1 ? "company" : "companies"}, highest score first.`}
           </p>
         )}
-        <Link
-          href="/add"
-          className="flex min-h-14 items-center justify-center rounded-lg bg-accent px-6 text-lg font-semibold text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          Add companies
-        </Link>
-        <FindCompanies />
+        <HomeActions />
         {/* Always rendered, so a refresh that fails mid-run doesn't end the run. */}
         <LookUpAll
           pending={notLooked.data ?? []}
@@ -262,7 +256,8 @@ function Score({ score, lookedUp }: { score: number | null; lookedUp: boolean })
   return (
     <span className="flex w-16 flex-col items-end">
       <span className="text-3xl font-bold tabular-nums tracking-[-0.03em]">{score}</span>
-      <span className="text-xs text-muted">{score === 1 ? "point" : "points"}</span>
+      {/* Scored from facts saved before its lookup (Find quotes, an imported tag). */}
+      <span className="text-right text-xs leading-tight text-muted">{lookedUp ? (score === 1 ? "point" : "points") : "so far, not looked up"}</span>
     </span>
   );
 }
