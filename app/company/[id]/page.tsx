@@ -3,12 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 
+import { availableHooks, draftFacts, MAX_WORDS } from "@/lib/drafts";
 import { redactSecrets } from "@/lib/redact";
 import type { Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
 
 import { LocalDate } from "../../local-date";
 import { AddPersonForm } from "./add-person";
+import { DraftPanel } from "./draft-panel";
 import { EnrichButton, ResearchButton } from "./enrich-button";
 
 export const metadata: Metadata = {
@@ -43,7 +45,7 @@ async function Company({ id }: { id: string }) {
 
   const supabase = await createClient();
   // RLS returns nothing for another user's company, which reads as not found.
-  const [companyResult, contactsResult] = await Promise.all([
+  const [companyResult, contactsResult, draftResult, profileResult] = await Promise.all([
     supabase
       .from("companies")
       .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons, connection, connection_source_url")
@@ -56,6 +58,14 @@ async function Company({ id }: { id: string }) {
       )
       .eq("company_id", id)
       .order("name"),
+    supabase
+      .from("outreach")
+      .select("subject, draft, contact_id")
+      .eq("company_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase.from("profiles").select("school, hometown, interests, role_targets").maybeSingle(),
   ]);
 
   if (companyResult.error) {
@@ -241,6 +251,32 @@ async function Company({ id }: { id: string }) {
         <div className="mt-6 flex flex-col gap-6">
           <ResearchButton companyId={company.id} />
           <AddPersonForm companyId={company.id} />
+        </div>
+      </section>
+
+      <section aria-labelledby="draft" className="mt-10 border-t-2 border-foreground pt-6">
+        <h2 id="draft" className="text-xl font-semibold">
+          Draft an email
+        </h2>
+        <p className="mt-2 text-base text-muted">
+          Under {MAX_WORDS} words, built from one fact about {company.name} and your profile, in the tone of your writing
+          samples.
+        </p>
+        <div className="mt-4">
+          {draftResult.error || profileResult.error ? (
+            <Alert>Couldn’t load the draft ({(draftResult.error ?? profileResult.error)!.message}). Reload to try again.</Alert>
+          ) : (
+            <DraftPanel
+              companyId={company.id}
+              people={(contactsResult.data ?? []).map((p) => ({ id: p.id, name: p.name, title: p.title, email: p.email }))}
+              hooks={availableHooks(draftFacts({ company, contact: null, profile: profileResult.data }))}
+              saved={
+                draftResult.data?.draft
+                  ? { subject: draftResult.data.subject ?? "", body: draftResult.data.draft, contactId: draftResult.data.contact_id }
+                  : null
+              }
+            />
+          )}
         </div>
       </section>
     </article>
