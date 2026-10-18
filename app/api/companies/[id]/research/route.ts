@@ -84,7 +84,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
 
   const { data: contacts, error: contactsError } = await supabase
     .from("contacts")
-    .select("id, name, title, school, hometown, school_status, hometown_status, school_evidence, hometown_evidence, added_by_user")
+    .select("id, name, title, school, hometown, school_status, hometown_status, school_evidence, hometown_evidence, added_by_user, source_quote")
     .eq("company_id", id)
     .order("name");
   if (contactsError) return fail(500, `Couldn't load the people (${contactsError.message}).`);
@@ -103,9 +103,12 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       needSchool: open(c.school, c.school_status),
       needHometown: open(c.hometown, c.hometown_status),
     }));
-  // The company's own pages named no founder or CEO: search for who founded
-  // or leads it first (within the same 3-search cap).
-  const discover = !contacts.some((c) => c.title && FOUNDER_OR_CEO.test(c.title));
+  // Search for who founded or leads the company first (within the same
+  // 3-search cap) when no founder or CEO is saved, or when the only one was
+  // itself found by search (co-founders are probably missing). Once two or
+  // more are saved, the searches go to their schools and hometowns instead.
+  const founders = contacts.filter((c) => c.title && FOUNDER_OR_CEO.test(c.title));
+  const discover = founders.length === 0 || (founders.length === 1 && !!founders[0].source_quote);
   if (people.length === 0 && !discover) {
     return done({ people: 0, found: [], searches: 0, notes: ["Everyone saved already has a school and hometown."] });
   }
