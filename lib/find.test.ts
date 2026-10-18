@@ -136,3 +136,41 @@ describe("withBackedWhy", () => {
     expect(withBackedWhy("Seed-stage AI startup; not confirmed: interns.", [], profile).why).toBe("Seed-stage AI startup; not confirmed: interns.");
   });
 });
+
+describe("acceptConnections, review cases", () => {
+  const profile = { school: "Duke University", hometown: "Minneapolis, MN", interests: [], role_targets: [] };
+  const page = { url: "https://acme.test/", text: "Acme builds lab robots. We serve customers across Minnesota." };
+  const company = { name: "Acme", domain: "acme.test" };
+  it("doesn't credit a list article's sentence about another company to this one", () => {
+    const quotes = [{ text: "Jane Doe, who grew up in Minneapolis, Minnesota, founded OtherCo.", url: "https://list.test/top" }];
+    const out = acceptConnections(
+      [{ kind: "hometown", value: "Minneapolis, Minnesota", person: "Jane Doe", quote: "Jane Doe, who grew up in Minneapolis, Minnesota, founded OtherCo." }],
+      page,
+      quotes,
+      profile,
+      "",
+      company,
+    );
+    expect(out).toEqual([]);
+  });
+  it("needs office wording: serving customers somewhere isn't an office", () => {
+    const out = acceptConnections([{ kind: "office", value: "Minnesota", person: "", quote: "We serve customers across Minnesota." }], page, [], profile, "", company);
+    expect(out).toEqual([]);
+  });
+  it("accepts a citation that ends in an ellipsis, not one that joins fragments", () => {
+    const quotes = [{ text: "Acme, a Minneapolis, Minnesota startup based downtown, recently...", url: "https://news.test/acme" }];
+    const ok = acceptConnections([{ kind: "office", value: "Minneapolis, Minnesota", person: "", quote: "Acme, a Minneapolis, Minnesota startup based downtown, recently..." }], page, quotes, profile, "", company);
+    expect(ok).toHaveLength(1);
+    const joined = acceptConnections([{ kind: "office", value: "Minneapolis, Minnesota", person: "", quote: "Acme … based in Minneapolis, Minnesota" }], page, quotes, profile, "", company);
+    expect(joined).toEqual([]);
+  });
+});
+
+describe("withBackedWhy, review cases", () => {
+  it("catches the school's short name and any US state, but not short codes like 'in'", () => {
+    const duke = { school: "Duke University", hometown: "Indianapolis, IN", interests: [], role_targets: [] };
+    expect(withBackedWhy("Founded by Duke grads.", [], duke).why).toBe("");
+    expect(withBackedWhy("A Texas fintech startup.", [], duke).why).toBe("");
+    expect(withBackedWhy("AI startup based in NYC.", [], duke).why).toBe("AI startup based in NYC.");
+  });
+});

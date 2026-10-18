@@ -210,6 +210,7 @@ function validate(raw: unknown, pages: PageText[]): Extraction {
     const place = str(o.place, LIMITS.short);
     const quote = str(o.quote, 1000);
     if (!place || !quote || !byUrl.get(o.source_url)!.includes(normalize(quote)) || !containsWords(normalize(quote), place)) continue;
+    if (!saysOffice(quote)) continue;
     locations.push({ value: place, quote, source_url: o.source_url, kind: "office", from: "lookup" });
   }
   for (const r of open_roles) {
@@ -230,6 +231,13 @@ function validate(raw: unknown, pages: PageText[]): Extraction {
     people,
     locations,
   };
+}
+
+// A sentence about where the company is, not where it sells: "headquartered
+// in", "our office", "based in", or a street address with a zip code.
+// "We serve customers across Minnesota" doesn't count.
+export function saysOffice(quote: string): boolean {
+  return /\b(headquarter(s|ed)?|hq|based|offices?|located|campus|studio|address)\b/i.test(quote) || /\b\d{5}(-\d{4})?\b/.test(quote);
 }
 
 export function normalize(s: string) {

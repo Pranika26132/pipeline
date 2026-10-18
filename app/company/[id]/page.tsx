@@ -487,7 +487,7 @@ function ScoreSection({
           </p>
         )}
       </div>
-      {!lookedUp ? (
+      {!lookedUp && score === null ? (
         <p className="mt-3 text-lg text-muted">Look up the company to score it.</p>
       ) : score === null ? (
         <p className="mt-3 text-lg text-muted">
@@ -499,6 +499,10 @@ function ScoreSection({
           Nothing on its pages matched <Link href="/profile" className="underline underline-offset-4">your profile</Link>.
         </p>
       ) : (
+        <>
+        {!lookedUp && (
+          <p className="mt-3 text-base text-muted">So far, from quotes saved when you added it. The lookup adds the rest.</p>
+        )}
         <ul className="mt-4 flex flex-col divide-y divide-rule border-y border-rule">
           {reasons.map((r, i) => (
             <li key={i} className="grid grid-cols-[3rem_1fr] gap-x-3 py-3">
@@ -509,6 +513,7 @@ function ScoreSection({
             </li>
           ))}
         </ul>
+        </>
       )}
     </section>
   );

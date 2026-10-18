@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeLocations, type CompanyLocation } from "./locations";
+import { mergeLocations, withoutLookupRoles, type CompanyLocation } from "./locations";
 import { regionsMatch, scoreCompany, type ScoreInput } from "./scoring";
 
 const office = (value: string, from: CompanyLocation["from"] = "lookup"): CompanyLocation => ({
@@ -30,8 +30,15 @@ describe("regionsMatch", () => {
     expect(regionsMatch("Minneapolis, MN", "St. Paul, Minnesota")).toBe(true);
     expect(regionsMatch("Raleigh, NC", "Durham, North Carolina")).toBe(true);
     expect(regionsMatch("Raleigh, NC", "Austin, TX")).toBe(false);
-    // "CA" after a foreign city is Canada, not California.
-    expect(regionsMatch("San Jose, CA", "Toronto, CA")).toBe(false);
+    // Zip codes and street numbers in a footer address don't matter.
+    expect(regionsMatch("Minneapolis, MN", "10 2nd Street NE #103, Minneapolis, MN 55413")).toBe(true);
+    // A code written the way the user wrote theirs is the same state.
+    expect(regionsMatch("Boston, MA", "Cambridge, MA")).toBe(true);
+    // The state comes after the city: Washington, DC is not Washington state.
+    expect(regionsMatch("Seattle, WA", "Washington, DC")).toBe(false);
+    expect(regionsMatch("London, Ontario", "Ontario, California")).toBe(false);
+    // A country is too broad to be a region.
+    expect(regionsMatch("Mumbai, India", "Bangalore, India")).toBe(false);
     // A bare city name could be anywhere, the same rule as hometowns.
     expect(regionsMatch("Minneapolis, MN", "Minneapolis")).toBe(false);
   });
@@ -57,5 +64,13 @@ describe("Nearby factor", () => {
     expect(scoreCompany({ profile, company: { ...company, locations: [{ ...office("Minneapolis, MN"), source_url: "" }] }, contacts: [] }).score).toBe(0);
     expect(scoreCompany({ profile, company: { ...company, locations: [office("Austin, TX")] }, contacts: [] }).score).toBe(0);
     expect(scoreCompany({ profile: { ...profile, weight_region: 0 }, company: { ...company, locations: [office("Minneapolis, MN")] }, contacts: [] }).score).toBe(0);
+  });
+});
+
+describe("withoutLookupRoles", () => {
+  it("drops the last lookup's role locations but keeps offices and Find's", () => {
+    const role = { value: "Austin, TX", quote: null, source_url: "https://a.test/careers", kind: "role" as const, from: "lookup" as const };
+    const kept = withoutLookupRoles([office("Minneapolis, MN", "find"), office("Austin, TX"), role]);
+    expect(kept.map((l) => `${l.kind}/${l.from}`)).toEqual(["office/find", "office/lookup"]);
   });
 });

@@ -1,11 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { normalizeCompanyUrl } from "./domain";
-import { BadModelOutputError, containsWords, mentionsPerson, normalize } from "./enrich/extract";
+import { BadModelOutputError, containsWords, mentionsPerson, normalize, saysOffice } from "./enrich/extract";
 import { readHomePage } from "./enrich/pages";
 import { aboutOnly, BLOCKED_DOMAINS } from "./enrich/research";
 import { FIND_MAX_RESULTS, FIND_MAX_SEARCHES, type FindConnection, type FoundCompany } from "./find-limits";
-import { placesMatch, placeTerms, regionsMatch, schoolsMatch } from "./scoring";
+import { placesMatch, placeTerms, regionsMatch, schoolsMatch, US_STATE_NAMES } from "./scoring";
 
 export { FIND_REQUEST_MAX, type FindConnection, type FoundCompany } from "./find-limits";
 
@@ -427,6 +427,7 @@ export function acceptConnections(
   quotes: SearchQuote[],
   profile: FindProfile | null,
   request = "",
+  company: { name: string; domain: string } | null = null,
 ): FindConnection[] {
   const out: FindConnection[] = [];
   const pageText = normalize(page.text);
@@ -435,12 +436,20 @@ export function acceptConnections(
     const { kind, value, person, quote } = r as Record<string, unknown>;
     if ((kind !== "school" && kind !== "hometown" && kind !== "office") || typeof value !== "string" || typeof quote !== "string") continue;
     const v = value.trim().slice(0, 120);
-    const q = quote.trim().replace(/\s+/g, " ").slice(0, 1000);
+    // A citation often ends in "..."; that's fine. One in the middle could
+    // join two fragments into a sentence no page has.
+    const q = quote.trim().replace(/\s+/g, " ").replace(/\s*(\.\.\.|…)$/, "").slice(0, 1000);
+    if (/\.\.\.|…/.test(q)) continue;
+    if (kind === "office" && !saysOffice(q)) continue;
     const who = kind === "office" ? null : typeof person === "string" && person.trim() ? person.trim().slice(0, 120) : null;
     if (!v || q.length < 10 || !containsWords(normalize(q), v)) continue;
     if (kind !== "office" && (!who || !mentionsPerson(q, who) || !aboutOnly(q, who, v, []))) continue;
-    const source = pageText.includes(normalize(q)) ? page.url : quotes.find((x) => normalize(x.text).includes(normalize(q)))?.url;
+    const onPage = pageText.includes(normalize(q));
+    const source = onPage ? page.url : quotes.find((x) => normalize(x.text).includes(normalize(q)))?.url;
     if (!source || !/^https?:\/\//i.test(source)) continue;
+    // A search quote must name this company: a list article's sentence about
+    // another company (or its founder) can't be credited to this one.
+    if (!onPage && company && !namesCompany(q, company.name, company.domain)) continue;
     const matches =
       kind === "school"
         ? !!profile?.school && schoolsMatch(profile.school, v)
@@ -467,13 +476,20 @@ function inRequest(request: string, place: string): boolean {
 // The reason may not claim the user's hometown, region or school unless a
 // quoted connection backs it: otherwise it's dropped (only the search step's
 // note could have put it there, and that isn't checked).
+const SCHOOL_GENERIC = new Set(["university", "college", "institute", "technology", "state", "the", "of", "and", "school", "at"]);
+
 export function withBackedWhy(why: string, connections: FindConnection[], profile: FindProfile | null) {
   const text = normalize(why);
   // "Minneapolis, MN" also backs "Minnesota".
   const backed = connections.map((c) => (c.kind === "school" ? normalize(c.value) : placeTerms(c.value).join(" "))).join(" | ");
+  // The user's hometown, its state, any US state, and the school by its
+  // full or short name ("Duke").
   const terms = [
     ...(profile?.hometown ? placeTerms(profile.hometown) : []),
-    ...(profile?.school ? [profile.school.trim().toLowerCase()] : []),
+    ...US_STATE_NAMES,
+    ...(profile?.school
+      ? [normalize(profile.school).trim(), ...normalize(profile.school).split(/\s+/).filter((w) => w.length >= 3 && !SCHOOL_GENERIC.has(w))]
+      : []),
   ];
   const unbacked = terms.some((t) => containsWords(text, t) && !containsWords(backed, t));
   return { why: unbacked ? "" : why, connections };
@@ -526,7 +542,14 @@ export function mergeVerified(
       domain: c.domain,
       description: a.description,
       source_url: c.candidate.source_url,
-      ...withBackedWhy(a.why, acceptConnections(a.connections, { url: c.url, text: c.pageText }, quotesFor[i] ?? [], profile, request), profile),
+      ...withBackedWhy(
+        a.why,
+        acceptConnections(a.connections, { url: c.url, text: c.pageText }, quotesFor[i] ?? [], profile, request, {
+          name: c.candidate.name,
+          domain: c.domain,
+        }),
+        profile,
+      ),
     });
   });
   return { companies, leftOut };

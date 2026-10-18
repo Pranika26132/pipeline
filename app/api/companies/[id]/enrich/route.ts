@@ -7,7 +7,7 @@ import { looksLikeDomain } from "@/lib/domain";
 import { describeFetchError } from "@/lib/enrich/safe-fetch";
 import { API_KEY_MESSAGE, isWellFormedApiKey, redactSecrets } from "@/lib/redact";
 import { canCheckFit } from "@/lib/fit";
-import { mergeLocations } from "@/lib/locations";
+import { mergeLocations, withoutLookupRoles } from "@/lib/locations";
 import { rescore } from "@/lib/rescore";
 import { judgeRoles, loadFitProfile } from "@/lib/role-fit-run";
 import { createClient } from "@/lib/supabase/server";
@@ -211,7 +211,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       field_sources: fieldSources,
       open_roles: roles,
       // Added to what's saved (by Find or earlier lookups), never replacing it.
-      locations: mergeLocations(company.locations, result.locations),
+      locations: mergeLocations(withoutLookupRoles(company.locations), result.locations),
       ...roleFit,
       // Flagged while the company has nobody to write to.
       needs_manual_info: existing.length + fresh.length === 0,

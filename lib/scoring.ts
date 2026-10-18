@@ -266,6 +266,8 @@ function placeParts(place: string, expandAmbiguous: boolean): string[] {
     .replace(/[\u0300-\u036f]/g, "")
     .split(/[,;]/)
     .map((p) => p.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim())
+    // Zip codes and street numbers say nothing about the place: "MN 55401" is MN.
+    .map((p) => p.split(" ").filter((w) => !/\d/.test(w)).join(" "))
     .filter((p) => p && p !== "usa" && p !== "us" && p !== "united states")
     .map((p) => (US_STATES[p] && (expandAmbiguous || !AMBIGUOUS_CODES.has(p)) ? US_STATES[p] : p));
 }
@@ -290,9 +292,12 @@ export function placesMatch(profilePlace: string, personPlace: string): boolean 
 
 // The words a place goes by, for spotting it in text: "Minneapolis, MN" ->
 // ["minneapolis", "minnesota", "mn"].
+// Two-letter codes are left out: "in" or "me" would match ordinary words.
 export function placeTerms(place: string): string[] {
-  return [...new Set([...placeParts(place, true), ...placeParts(place, false)])].filter((t) => t.length >= 2);
+  return [...new Set([...placeParts(place, true), ...placeParts(place, false)])].filter((t) => t.length >= 3);
 }
+
+export const US_STATE_NAMES: readonly string[] = [...new Set(Object.values(US_STATES))];
 
 // "Nearby": an office, HQ or role location in the profile's place, or in the
 // same state as the profile's city ("Minneapolis, MN" counts for "St. Paul,
@@ -302,8 +307,14 @@ export function regionsMatch(profilePlace: string, place: string): boolean {
   const mine = placeParts(profilePlace, true);
   if (mine.length < 2) return false;
   const state = mine[mine.length - 1];
-  // Ambiguous codes in the company's place ("Toronto, CA") aren't read as states.
-  return placeParts(place, false).some((p) => p === state);
+  // Only a US state is a region here; a country ("Mumbai, India") is too broad.
+  if (!US_STATE_NAMES.includes(state)) return false;
+  // The code as the user wrote it ("MA"), so "Cambridge, MA" matches "Boston, MA".
+  const myCode = placeParts(profilePlace, false).at(-1);
+  const theirs = placeParts(place, false);
+  // The state is after the city: "Washington, DC" is not Washington state.
+  const tail = theirs.length >= 2 ? theirs.slice(1) : theirs;
+  return tail.some((p) => p === state || (myCode !== state && p === myCode));
 }
 
 function regionReason(locations: unknown, home: string) {

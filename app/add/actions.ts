@@ -385,7 +385,9 @@ export async function addFromFind(
     const byPerson = new Map<string, Record<string, unknown>>();
     for (const c of found) {
       if (c.kind === "office" || !c.person) continue;
-      const row = byPerson.get(c.person) ?? { company_id: company.id, name: c.person, source_url: c.source_url, source_quote: c.quote };
+      // One row per person, whatever the capitalization ("Jane Doe", "jane doe").
+      const key = c.person.trim().toLowerCase();
+      const row = byPerson.get(key) ?? { company_id: company.id, name: c.person, source_url: c.source_url, source_quote: c.quote };
       const evidenceRow = [{ value: c.value, quote: c.quote, url: c.source_url, single: true }];
       if (c.kind === "school" && !row.school) {
         Object.assign(row, { school: c.value, school_source_url: c.source_url, school_quote: c.quote, school_status: "stated", school_evidence: evidenceRow });
@@ -393,7 +395,7 @@ export async function addFromFind(
       if (c.kind === "hometown" && !row.hometown) {
         Object.assign(row, { hometown: c.value, hometown_source_url: c.source_url, hometown_quote: c.quote, hometown_status: "stated", hometown_evidence: evidenceRow });
       }
-      byPerson.set(c.person, row);
+      byPerson.set(key, row);
     }
     if (byPerson.size > 0) {
       const { error } = await session.supabase.from("contacts").insert([...byPerson.values()]);
@@ -410,7 +412,8 @@ export async function addFromFind(
 
 // Find's connections come back from the browser, so each is checked again
 // for shape: a known kind, a sentence that names the value (and the person),
-// and a web page as its source.
+// and a web page as its source. The quote isn't fetched again: a forged one
+// can only change the user's own rows (RLS), like typing a person by hand.
 function readConnections(raw: unknown): FindConnection[] {
   const out: FindConnection[] = [];
   for (const c of Array.isArray(raw) ? raw.slice(0, 10) : []) {

@@ -256,7 +256,8 @@ function Score({ score, lookedUp }: { score: number | null; lookedUp: boolean })
   return (
     <span className="flex w-16 flex-col items-end">
       <span className="text-3xl font-bold tabular-nums tracking-[-0.03em]">{score}</span>
-      <span className="text-xs text-muted">{score === 1 ? "point" : "points"}</span>
+      {/* Scored from facts saved before its lookup (Find quotes, an imported tag). */}
+      <span className="text-right text-xs leading-tight text-muted">{lookedUp ? (score === 1 ? "point" : "points") : "so far, not looked up"}</span>
     </span>
   );
 }

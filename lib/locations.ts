@@ -28,6 +28,12 @@ export function readLocations(raw: unknown): CompanyLocation[] {
   );
 }
 
+// Each lookup replaces its own role locations (a closed role's place stops
+// counting); offices and everything Find saved stay.
+export function withoutLookupRoles(old: unknown): CompanyLocation[] {
+  return readLocations(old).filter((l) => !(l.from === "lookup" && l.kind === "role"));
+}
+
 // Old entries first, then new ones that aren't already there (same place,
 // same page). Capped so the column stays small.
 export function mergeLocations(old: unknown, added: CompanyLocation[]): CompanyLocation[] {
