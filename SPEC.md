@@ -44,7 +44,7 @@ Every score shows its reasons ("Founder went to Duke: found on /about page") wit
 - **The app never sends anything.** It produces a draft; I read it and send it.
 - Built (`feature/drafts`): "Draft an email" on the company page. Pick a recipient (a saved person, or the team) and what to lead with (same school, same hometown, an open role, what they build; only the ones a fact supports). Claude Opus 5.5 writes from a numbered list of facts: company facts with sources, the person's counted facts, and profile facts. Every draft is checked before it's shown (under 120 words, no stock phrases, no placeholders, no number that isn't in the facts, one named company fact), with one retry. The draft is saved on the company's outreach row and the status becomes "drafted". It can be edited (live word count and stock-phrase warning), copied, or opened in Gmail's compose window, with the address filled in only if the user typed one.
 
-## Find companies (`feature/find`; replaces Discover, which is cut)
+## Find companies (replaces Discover, which is cut)
 A way to find new targets without leaving the app.
 - A **Find companies** button next to "Add companies" on `/` opens a box: type a request in plain English ("early-stage quant firms in NYC hiring interns"). The profile (target roles, interests, major, class year, school, hometown) is sent with it.
 - `/api/find`: Claude (Haiku) with the web search tool, at most 10 searches per request (about 10 to 20 cents, shown under the box), LinkedIn and people-data sites blocked. It proposes up to 12 companies: name, website, why, and the search result it was found in.
@@ -94,6 +94,15 @@ Next.js on Vercel, Supabase (auth + Postgres), one server route for enrichment a
 - Same company added twice: dedupe on domain
 - Model returns bad JSON: show the error, keep the raw company row
 - Draft requested with no contact: write it to "the team" and say so
+
+## Known limitations and next steps (at feature freeze)
+- **Region and hometown matching (the Minnesota case)**:
+  - It counts only connections a page states in a quotable sentence. Many real connections aren't stated that way, so Find often shows none, and its "why" line is dropped when it would claim my area without a quote.
+  - Find reads only the home page (top and footer) and search citations.
+  - "Nearby" is the same city, or the same US state as my city: no metro areas across state lines, no non-US regions, no bare city names. A two-letter code written like mine counts as my state ("Toronto, CA" matches a "San Jose, CA" hometown).
+  - **Next:** read about and contact pages in Find, a metro-area table, non-US regions, structured addresses.
+- Founder research varies between runs, and one person can appear under two names.
+- Due follow-ups are hidden with contacted companies by default; a "follow-ups due" link would help.
 
 ## Build plan (deadline: Mon Oct 19, 11:59pm)
 - **Tue night / Wed**: repo, Next.js, Supabase tables + RLS, auth, deploy to Vercel. Empty app live on day one.
