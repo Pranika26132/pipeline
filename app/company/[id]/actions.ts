@@ -107,3 +107,23 @@ export async function saveEditedDraft(companyId: string, _prev: SaveDraftState, 
   revalidatePath("/", "layout");
   return { savedAt: Date.now() };
 }
+
+export type RenameState = { error?: string; savedAt?: number };
+
+// Sets the company's name (e.g. "Turbo AI" for one saved as "turbo.ai").
+export async function renameCompany(companyId: string, _prev: RenameState, formData: FormData): Promise<RenameState> {
+  const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
+  const supabase = await createClient();
+  const { data: auth, error: authError } = await supabase.auth.getClaims();
+  if (authError) return { error: `Your session couldn't be checked (${authError.message}). Sign in again.` };
+  if (!auth?.claims) return { error: "You're signed out. Sign in again to rename the company." };
+  if (!UUID.test(companyId)) return { error: "That company isn't in your list." };
+  if (!name) return { error: "Enter the company's name." };
+  if (name.length > MAX) return { error: `Keep the name under ${MAX} characters.` };
+  // RLS limits the update to the user's own company.
+  const { data, error } = await supabase.from("companies").update({ name }).eq("id", companyId).select("id");
+  if (error) return { error: `Couldn't rename the company (${error.message}).` };
+  if (data.length === 0) return { error: "That company isn't in your list." };
+  revalidatePath("/", "layout");
+  return { savedAt: Date.now() };
+}

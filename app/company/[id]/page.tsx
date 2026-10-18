@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 
+import { looksLikeDomain } from "@/lib/domain";
 import { availableHooks, draftFacts, MAX_WORDS } from "@/lib/drafts";
 import { redactSecrets } from "@/lib/redact";
 import type { Reason } from "@/lib/scoring";
@@ -10,6 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 
 import { LocalDate } from "../../local-date";
 import { AddPersonForm } from "./add-person";
+import { RenameForm } from "./rename-form";
 import { DraftPanel } from "./draft-panel";
 import { EnrichButton, ResearchButton } from "./enrich-button";
 
@@ -87,6 +89,7 @@ async function Company({ id }: { id: string }) {
   return (
     <article className="mt-6 flex flex-col">
       <h1 className="text-4xl font-bold tracking-[-0.04em] wrap-anywhere">{company.name}</h1>
+      {looksLikeDomain(company.name, company.domain) && <RenameForm companyId={company.id} current={company.name} />}
       {href ? (
         <a
           href={href}
@@ -269,7 +272,7 @@ async function Company({ id }: { id: string }) {
             <DraftPanel
               companyId={company.id}
               people={(contactsResult.data ?? []).map((p) => ({ id: p.id, name: p.name, title: p.title, email: p.email }))}
-              hooks={availableHooks(draftFacts({ company, contact: null, profile: profileResult.data }))}
+              hooks={availableHooks(draftFacts({ company, contact: null, profile: profileResult.data, today: new Date() }))}
               saved={
                 draftResult.data?.draft
                   ? { subject: draftResult.data.subject ?? "", body: draftResult.data.draft, contactId: draftResult.data.contact_id }

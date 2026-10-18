@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { NextRequest } from "next/server";
 
+import { looksLikeDomain } from "@/lib/domain";
 import { draftFacts, HOOKS, type Hook } from "@/lib/drafts";
 import { writeDraft } from "@/lib/draft-writer";
 import { describeModelError } from "@/lib/enrich/errors";
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   const [companyResult, contactResult, profileResult] = await Promise.all([
     supabase
       .from("companies")
-      .select("name, summary, stage, size, open_roles, score_reasons, field_sources")
+      .select("name, domain, summary, stage, size, open_roles, score_reasons, field_sources")
       .eq("id", id)
       .maybeSingle(),
     contactId
@@ -67,7 +68,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
           .eq("company_id", id)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    supabase.from("profiles").select("school, hometown, interests, role_targets, writing_samples").maybeSingle(),
+    supabase.from("profiles").select("full_name, school, hometown, interests, role_targets, writing_samples").maybeSingle(),
   ]);
   if (companyResult.error) return fail(500, `Couldn't load the company (${companyResult.error.message}).`);
   if (!companyResult.data) return fail(404, "That company isn't in your list.");
@@ -76,6 +77,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   if (profileResult.error) return fail(500, `Couldn't load your profile (${profileResult.error.message}).`);
 
   const company = companyResult.data;
+  if (looksLikeDomain(company.name, company.domain)) {
+    return fail(422, `Set the company's name first (it's saved as ${company.domain}). Drafts use the name.`);
+  }
   const contact = contactResult.data;
   const profile = profileResult.data;
   // The same rule as scoring: a school or hometown is used only when it's
@@ -92,6 +96,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
         }
       : null,
     profile,
+    today: new Date(),
   });
   if (!facts.some((f) => f.kind === "company")) {
     return fail(422, "There's nothing specific about this company to write from yet. Look it up first.");
@@ -105,6 +110,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       facts,
       hook,
       samples: profile?.writing_samples ?? [],
+      signature: profile?.full_name ?? null,
     });
   } catch (e) {
     // Our own check messages say what was wrong; API errors use fixed text.

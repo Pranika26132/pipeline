@@ -266,26 +266,14 @@ Known limits:
   - drafts used a person's school with no source (same rule as scoring now).
 - Known: after a follow-up draft, the company's newest row is "drafted", so the list shows Drafted rather than Sent. `feature/status` should decide how status reads across rows.
 
-## In progress (branch `feature/drafts`, WIP commit, not pushed, does not build yet)
-User asked (2026-10-18) to make drafts less generic. Status:
-- **Why Turbo AI scores 0** (answered, no code needed): the user's profile has "Hiring for a role I want" set to "Doesn't matter" (`weight_open_role = 0`). The role titles do match "Software engineering". "Summer 2026 SWE Intern" has passed, and scoring doesn't treat that as past yet; the fit step will.
-- Done:
-  - Migration `20261018010306_profile_full_name.sql` (applied): `profiles.full_name`. "Your name" is on /profile (form, save, load).
-  - `lib/roles.ts` `roleTiming` (past/upcoming/undated from "Summer 2026" etc., with tests).
-  - `lib/drafts.ts` reworked:
-    - fact kinds: company (product, role, stage, size), connection (shared school or hometown), recipient, me;
-    - past-dated roles are marked "not open, ask about upcoming internships";
-    - the interests-list fact is removed;
-    - `checkDraft` now takes `{company, connection}` and extra known text (writing samples).
-- Left to do:
-  1. Pass `today: new Date()` to `draftFacts` in `app/api/companies/[id]/draft/route.ts` and `app/company/[id]/page.tsx`.
-  2. `lib/draft-writer.ts`:
-     - schema gets `company_fact` plus `connection_fact` (id or "none"), and `checkDraft` gets `{company, connection}` and the samples text;
-     - prompt: prefer a specific "what they build" sentence; at most one connection; one concrete line about the student from a profile or sample fact; sign off "Best,\n<full_name>" (just "Best," if there's no name);
-     - pass `full_name` and the samples from the route.
-  3. Company name: add `company_name` to the extract schema (must appear on a page) and save it when `companies.name` looks like a domain. Add a rename server action, plus a "Company name" field on the company page when the name looks like a domain (turbo.ai → Turbo AI).
-  4. Update `lib/drafts.test.ts` for the new kinds and `checkDraft` signature; add a test for a past role.
-  5. Build, lint and test. Regenerate a Turbo AI draft as a test. Push, update the PR #11 description, and give the user a test list.
+- **Less generic drafts** (user, 2026-10-18):
+  - A role whose dates have passed (`lib/roles.ts` `roleTiming`, e.g. "Summer 2026" in October 2026) is never presented as open; the draft asks about upcoming internships instead.
+  - The interests list is no longer a fact. Target roles are given with "name at most one". The draft adds one concrete line about the student from a profile fact or something a writing sample states; sample text counts as known for the number check.
+  - Drafts prefer a specific "what they build" sentence. Facts are now `company` (exactly one), `connection` (shared school or hometown, at most one), `recipient` and `me`.
+  - Company names: the lookup extracts the company's name as its pages write it (it must appear on a page) and replaces a domain-style name (`looksLikeDomain`). When the name still looks like a domain, the company page shows a "Company name" field, and drafts ask for a name first.
+  - "Your name" on /profile (migration `20261018010306_profile_full_name.sql`, no new policies) signs drafts.
+  - Turbo AI test: the lookup renamed "turbo.ai" to "Turbo AI". Both drafts (106 and 114 words) said what Turbo AI builds, treated the Summer 2026 role as past and asked about upcoming internships, used the compilers-parser line from a sample, and signed with the name. The draft to Sarthak also mentioned the past role alongside the product.
+- **Why Turbo AI scored 0:** the user's profile has "Hiring for a role I want" set to "Doesn't matter" (`weight_open_role = 0`). The matching itself works.
 
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
