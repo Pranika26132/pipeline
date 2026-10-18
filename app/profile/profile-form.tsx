@@ -14,6 +14,7 @@ import {
 } from "@/lib/profile";
 
 import { saveProfile, type ProfileState } from "./actions";
+import { ResumeField } from "./resume-field";
 
 // A dropped connection or an oversized request throws instead of returning
 // an error. Catch it here so the message shows in the form and nothing typed
@@ -64,6 +65,41 @@ export function ProfileForm({ initial }: { initial: ProfileValues }) {
           <input name="hometown" defaultValue={values.hometown} maxLength={LIMITS.text} autoComplete="address-level2" className={field} />
           <span className="text-sm text-muted">A city, state or region, like Raleigh, North Carolina.</span>
         </label>
+        <div className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-3">
+          <label className="flex flex-col gap-2">
+            <span className="text-base font-medium">Class of</span>
+            <input
+              name="gradYear"
+              defaultValue={values.gradYear}
+              inputMode="numeric"
+              maxLength={4}
+              placeholder="2028"
+              autoComplete="off"
+              className={`${field} tabular-nums`}
+            />
+          </label>
+          <label className="flex flex-col gap-2">
+            <span className="text-base font-medium">Degree</span>
+            <input name="degree" defaultValue={values.degree} maxLength={LIMITS.degree} placeholder="BS" autoComplete="off" className={field} />
+          </label>
+        </div>
+        <label className="flex flex-col gap-2">
+          <span className="text-base font-medium">Major</span>
+          <input name="major" defaultValue={values.major} maxLength={LIMITS.major} autoComplete="off" className={field} />
+          <span className="text-sm text-muted">Used to judge which open roles fit you, like Computer Science and Math.</span>
+        </label>
+      </section>
+
+      <section aria-labelledby="resume" className={sectionClass}>
+        <div className="flex flex-col gap-2">
+          <h2 id="resume" className="text-xl font-semibold">
+            Your resume
+          </h2>
+          <p className="text-base text-muted">
+            Role fit checks open roles against it, and each draft can use one line from it about you.
+          </p>
+        </div>
+        <ResumeField initial={values.resume} fieldClass={field} />
       </section>
 
       <section aria-labelledby="looking-for" className={sectionClass}>

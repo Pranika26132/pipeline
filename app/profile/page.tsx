@@ -43,7 +43,7 @@ async function Profile() {
   // RLS returns only the signed-in user's row; none until the first save.
   const { data, error } = await supabase
     .from("profiles")
-    .select("full_name, school, hometown, interests, role_targets, writing_samples, weight_school, weight_hometown, weight_open_role, weight_early_stage")
+    .select("full_name, school, hometown, grad_year, degree, major, resume, interests, role_targets, writing_samples, weight_school, weight_hometown, weight_open_role, weight_early_stage")
     .maybeSingle();
   if (error) return <Alert>Couldn’t load your profile ({error.message}). Reload to try again.</Alert>;
 
@@ -54,6 +54,10 @@ async function Profile() {
     fullName: data?.full_name ?? "",
     school: data?.school ?? "",
     hometown: data?.hometown ?? "",
+    gradYear: data?.grad_year ? String(data.grad_year) : "",
+    degree: data?.degree ?? "",
+    major: data?.major ?? "",
+    resume: data?.resume ?? "",
     interests: data?.interests ?? [],
     roles: roles.filter((r: string) => presets.has(r)),
     otherRoles: roles.filter((r: string) => !presets.has(r)).join(", "),

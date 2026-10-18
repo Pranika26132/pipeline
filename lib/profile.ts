@@ -60,6 +60,10 @@ export const LIMITS = {
   otherRoles: 20 * 82,
   sample: 3000,
   samples: 3,
+  degree: 100,
+  major: 200,
+  // Matches lib/resume.ts RESUME_MAX_CHARS and the database check.
+  resume: 20000,
 } as const;
 
 // The form's fields as typed, so they can be shown again after an error.
@@ -67,6 +71,10 @@ export type ProfileValues = {
   fullName: string;
   school: string;
   hometown: string;
+  gradYear: string;
+  degree: string;
+  major: string;
+  resume: string;
   interests: string[];
   roles: string[];
   otherRoles: string;
@@ -81,6 +89,10 @@ export function readProfileForm(formData: FormData): ProfileValues {
     fullName: text("fullName"),
     school: text("school"),
     hometown: text("hometown"),
+    gradYear: text("gradYear"),
+    degree: text("degree"),
+    major: text("major"),
+    resume: text("resume"),
     interests: formData.getAll("interests").map(String),
     roles: formData.getAll("roles").map(String),
     otherRoles: text("otherRoles"),
@@ -95,6 +107,10 @@ export type Profile = {
   interests: string[];
   role_targets: string[];
   writing_samples: string[];
+  grad_year?: number | null;
+  degree?: string | null;
+  major?: string | null;
+  resume?: string | null;
 } & Record<WeightKey, number>;
 
 // True when there's nothing to score or draft with yet.
@@ -105,6 +121,18 @@ export function isProfileEmpty(p: Partial<Profile> | null | undefined): boolean 
     !p.hometown?.trim() &&
     !p.interests?.length &&
     !p.role_targets?.length &&
-    !p.writing_samples?.length
+    !p.writing_samples?.length &&
+    !p.major?.trim() &&
+    !p.resume?.trim()
   );
+}
+
+// A graduation year as typed: empty, or a four-digit year in a sensible range.
+export function parseGradYear(value: string): { year: number | null } | { error: string } {
+  const v = value.trim();
+  if (!v) return { year: null };
+  if (!/^\d{4}$/.test(v)) return { error: "Enter your graduation year as four digits, like 2028." };
+  const year = Number(v);
+  if (year < 2000 || year > 2100) return { error: "That graduation year doesn't look right." };
+  return { year };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { levelFor, WEIGHTS } from "./profile";
+import { levelFor, parseGradYear, WEIGHTS } from "./profile";
 
 describe("score weight choices", () => {
   it("default choices give SPEC.md's points: school 3, hometown 2, open role 2, early stage 1", () => {
@@ -29,5 +29,15 @@ describe("score weight choices", () => {
     expect(levelFor("weight_school", 10)).toBe("a_lot");
     expect(levelFor("weight_hometown", 1)).toBe("matters");
     expect(levelFor("weight_early_stage", 7)).toBe("a_lot");
+  });
+});
+
+describe("parseGradYear", () => {
+  it("accepts empty or a four-digit year in range", () => {
+    expect(parseGradYear("")).toEqual({ year: null });
+    expect(parseGradYear(" 2028 ")).toEqual({ year: 2028 });
+    expect(parseGradYear("28")).toHaveProperty("error");
+    expect(parseGradYear("1999")).toHaveProperty("error");
+    expect(parseGradYear("20x8")).toHaveProperty("error");
   });
 });
