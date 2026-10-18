@@ -24,9 +24,17 @@ type Run = {
   finished: boolean;
 };
 
+// Other parts of the page (Find) queue companies they just added with this event.
+export const QUEUE_LOOKUP_EVENT = "pipeline:queue-lookup";
+
+export function queueLookup(targets: Target[]) {
+  window.dispatchEvent(new CustomEvent<Target[]>(QUEUE_LOOKUP_EVENT, { detail: targets }));
+}
+
 // Looks up every company that hasn't been looked up, one at a time, through
 // the same route as the button on a company page (so its checks and the
-// one-minute wait apply). Runs while this page is open.
+// one-minute wait apply). Runs while this page is open. Companies queued by
+// Find start a run on their own, or join the one already running.
 export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError: string | null }) {
   const router = useRouter();
   const [, startRefresh] = useTransition();
@@ -35,27 +43,44 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
   const stopRef = useRef(false);
   // Guards against a second tap starting a second run before the first renders.
   const runningRef = useRef(false);
+  // The run's targets; Find can add to it while it runs.
+  const queueRef = useRef<Target[]>([]);
+  const startRef = useRef<(targets: Target[]) => void>(() => {});
 
   // Leaving the page stops the run after the current lookup.
   useEffect(() => () => void (stopRef.current = true), []);
 
+  useEffect(() => {
+    const onQueue = (e: Event) => {
+      const added = (e as CustomEvent<Target[]>).detail ?? [];
+      if (runningRef.current) {
+        const known = new Set(queueRef.current.map((t) => t.id));
+        queueRef.current.push(...added.filter((t) => !known.has(t.id)));
+      } else if (added.length > 0) startRef.current(added);
+    };
+    window.addEventListener(QUEUE_LOOKUP_EVENT, onQueue);
+    return () => window.removeEventListener(QUEUE_LOOKUP_EVENT, onQueue);
+  }, []);
+
   const running = run !== null && !run.finished;
 
-  async function start() {
+  async function start(initial: Target[] = pending) {
     if (runningRef.current) return;
     runningRef.current = true;
     setConfirming(false);
     stopRef.current = false;
-    // A snapshot: the list refreshes during the run, but these are the targets.
-    const targets = pending;
-    let state: Run = { targets, done: 0, current: null, failures: [], warnings: [], skipped: 0, found: [], stopped: null, finished: false };
+    // A snapshot: the list refreshes during the run, but these are the
+    // targets (plus any Find queues meanwhile).
+    queueRef.current = [...initial];
+    let state: Run = { targets: queueRef.current.slice(), done: 0, current: null, failures: [], warnings: [], skipped: 0, found: [], stopped: null, finished: false };
     const update = (next: Partial<Run>) => {
-      state = { ...state, ...next };
+      state = { ...state, ...next, targets: queueRef.current.slice() };
       setRun(state);
     };
     update({});
 
-    for (const t of targets) {
+    for (let i = 0; i < queueRef.current.length; i++) {
+      const t = queueRef.current[i];
       if (stopRef.current) {
         update({ stopped: "Stopped. Companies already looked up keep their results." });
         break;
@@ -110,6 +135,10 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
     runningRef.current = false;
   }
 
+  useEffect(() => {
+    startRef.current = (targets) => void start(targets);
+  });
+
   if (loadError && !run) {
     return (
       <p role="alert" className="rounded-md bg-danger-surface px-4 py-3 text-base text-danger">
@@ -145,7 +174,7 @@ export function LookUpAll({ pending, loadError }: { pending: Target[]; loadError
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={start}
+              onClick={() => start()}
               className="min-h-12 rounded-lg bg-accent px-4 text-base font-semibold text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
               Look up {label}

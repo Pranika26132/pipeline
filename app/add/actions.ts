@@ -26,6 +26,8 @@ export type AddState = {
   // Echoed back on an error so the field keeps what the user typed.
   url?: string;
   name?: string;
+  // Companies this submit added, so they can be queued for a lookup.
+  added?: { id: string; name: string }[];
 };
 
 type Candidate = {
@@ -284,8 +286,9 @@ async function save(
     });
   }
 
+  let added: { id: string; name: string }[] = [];
   if (fresh.length > 0) {
-    const { error } = await supabase
+    const { data: inserted, error } = await supabase
       .from("companies")
       .insert(
         fresh.map((c) => ({
@@ -296,7 +299,8 @@ async function save(
           connection: c.connection ?? null,
           connection_source_url: c.connectionSource ?? null,
         })),
-      );
+      )
+      .select("id, name");
     if (error) {
       const message =
         error.code === "23505"
@@ -305,6 +309,7 @@ async function save(
       const done = taggedDomains.size > 0 ? ` ${taggedDomains.size} saved companies were tagged before this.` : "";
       return { submittedAt, error: message + done };
     }
+    added = inserted;
     fresh.forEach((c) =>
       outcomes.push({ label: c.label, line: c.line, domain: c.domain, status: "added", message: c.connection ? `Added, tagged ${c.connection}.` : "Added." }),
     );
@@ -316,12 +321,37 @@ async function save(
     const scored = await rescore(supabase);
     if (scored.error) {
       outcomes.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
-      return { submittedAt, rows: outcomes, error: `Imported, but scores couldn't be updated. ${scored.error}` };
+      return { submittedAt, rows: outcomes, added, error: `Imported, but scores couldn't be updated. ${scored.error}` };
     }
   }
 
   outcomes.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
-  return { submittedAt, rows: outcomes };
+  return { submittedAt, rows: outcomes, added };
+}
+
+const FIND_MAX_ADD = 20;
+
+// Adds the companies the user ticked in Find. The list comes from the
+// browser, so each site goes through the same checks as a pasted link.
+export async function addFromFind(items: { name: string; url: string }[], request: string): Promise<AddState> {
+  const submittedAt = Date.now();
+  const session = await signedInClient();
+  if ("error" in session) return { submittedAt, error: session.error };
+  if (!Array.isArray(items) || items.length === 0) return { submittedAt, error: "Tick at least one company to add." };
+  if (items.length > FIND_MAX_ADD) return { submittedAt, error: `Add at most ${FIND_MAX_ADD} at a time.` };
+  const candidates: Candidate[] = [];
+  const rejected: RowOutcome[] = [];
+  for (const item of items) {
+    const name = typeof item?.name === "string" ? item.name.trim().replace(/\s+/g, " ").slice(0, NAME_MAX_LENGTH) : "";
+    const normalized = normalizeCompanyUrl(typeof item?.url === "string" ? item.url : "");
+    if (!normalized.ok) {
+      rejected.push({ label: name || "(no name)", status: "skipped", message: normalized.error });
+      continue;
+    }
+    candidates.push({ label: name || normalized.domain, name: name || normalized.domain, url: normalized.url, domain: normalized.domain });
+  }
+  const source = `find:${String(request ?? "").trim().replace(/\s+/g, " ").slice(0, FILENAME_MAX_LENGTH)}`;
+  return save(session.supabase, candidates, rejected, source, submittedAt);
 }
 
 function httpUrl(raw: string): string | undefined {
