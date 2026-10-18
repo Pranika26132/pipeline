@@ -285,6 +285,29 @@ Known limits:
 - Drafts never wait on "Your name" either. With a name in the profile they end "Best,\n<name>". Without one they end with "Best," alone for the student to sign. `signOff` also drops a name the model made up. The profile field stays optional. Retest with no profile name: the oxide.computer draft generated straight away and ended with "Best,".
 - Retest: a draft for a company saved as "oxide.computer", with no name set, worked straight away. It said "Oxide" throughout and was 88 words.
 
+## Finished (branch `feature/status`, 2026-10-18)
+- **Company page "Status":** chips for To contact, Drafted, Sent, Replied, Interview, Rejected and Ghosted, plus an optional follow-up date, saved by the `saveStatus` server action. Dates must be real (round-trip checked, years 2000–2100).
+- **Status model:**
+  - Status lives on the company's newest outreach row (view `company_status`, now with `follow_up_on` and `sent_at`).
+  - `sent_at` is set when the status changes to Sent, and cleared when it goes back to To contact or Drafted. "Marked sent on" shows only while the company counts as contacted.
+- **Follow-up drafts:**
+  - A draft written after "sent" goes on a new row flagged `is_follow_up` that copies the status, follow-up date and send date, so the company still reads "Sent". Edits to that draft update the same row.
+  - "Mark follow-up sent" records a new send date and clears the flag.
+- **List (`/`):** each row shows its status badge and a follow-up badge. The badge reads "Follow up today", "Follow up (was Oct 15)" or "Follow up Oct 21", judged against the viewer's own date with a fixed en-US format. The existing status chips and the "hidden while contacted" toggle work as before.
+- **Migrations:** `20261018033935_company_status_follow_up.sql` (view columns) and `20261018040222_outreach_follow_up_flag.sql` (`outreach.is_follow_up`). No new policies: the view is `security_invoker`, and the outreach policies cover the column.
+- **Tested by script** (throwaway users, deleted):
+  - a bad status, a bad date and Feb 30 were each rejected;
+  - Sent got its send date, and the company was hidden by default and shown under the Sent chip with its badges;
+  - two follow-up drafts stayed one row, and changing only the date left the send date alone;
+  - "Mark follow-up sent" set a new send date, and going back to Drafted cleared it.
+- **Fresh-context review:** RLS fine. Fixed:
+  - a stale panel could save the old status back after a draft;
+  - every follow-up draft save added a row;
+  - `sent_at` was stamped on a date-only change and never cleared;
+  - two hydration mismatches (dates formatted on the server);
+  - impossible dates reached Postgres.
+- **Known (product):** contacted companies are hidden by default, so a due follow-up only shows with the toggle or the Sent chip. A "follow-ups due" link could help later.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
