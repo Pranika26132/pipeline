@@ -273,6 +273,10 @@ Known limits:
   - Company names: the lookup extracts the company's name as its pages write it (it must appear on a page) and replaces a domain-style name (`looksLikeDomain`). When the name still looks like a domain, the company page shows a "Company name" field, and drafts ask for a name first.
   - "Your name" on /profile (migration `20261018010306_profile_full_name.sql`, no new policies) signs drafts.
   - Turbo AI test: the lookup renamed "turbo.ai" to "Turbo AI". Both drafts (106 and 114 words) said what Turbo AI builds, treated the Summer 2026 role as past and asked about upcoming internships, used the compilers-parser line from a sample, and signed with the name. The draft to Sarthak also mentioned the past role alongside the product.
+- **Sign-off and school wording** (user):
+  - Drafts always end "Best,\n<full_name>": `signOff` replaces whatever closing the model wrote. Without a name in the profile, the draft route asks for one first.
+  - A shared school is worded neutrally ("I'm a Duke student and saw you studied at Duke"), never claiming the person's current status. Turbo AI retest: both drafts used that wording and ended with the name.
+  - Watch: one draft said "a small team like yours", which isn't from a fact.
 - **Why Turbo AI scored 0:** the user's profile has "Hiring for a role I want" set to "Doesn't matter" (`weight_open_role = 0`). The matching itself works.
 
 ## Decisions
