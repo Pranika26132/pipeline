@@ -22,22 +22,15 @@ import { createClient } from "@/lib/supabase/server";
 import { FollowUpBadge } from "./follow-up-badge";
 import { FindCompanies } from "./find-companies";
 import { LookUpAll } from "./look-up-all";
-import { SignOutButton } from "./sign-out-button";
+import { TopBar } from "./top-bar";
 
 const LIST_LIMIT = 500;
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pt-10 pb-10 sm:pt-16">
-      <div className="flex items-start justify-between gap-4">
-        <h1 className="text-6xl font-bold tracking-[-0.05em]">Pipeline</h1>
-        <Link
-          href="/profile"
-          className="-mr-2 flex min-h-12 shrink-0 items-center px-2 text-base font-medium underline underline-offset-4"
-        >
-          Profile
-        </Link>
-      </div>
+    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pt-6 pb-10 sm:pt-12">
+      <TopBar back={false} />
+      <h1 className="mt-2 text-6xl font-bold tracking-[-0.05em]">Pipeline</h1>
       <Suspense fallback={<p className="mt-6 text-lg text-muted">Loading your companies…</p>}>
         {searchParams.then((params) => (
           <TargetList filters={parseFilters(params)} />
@@ -234,14 +227,6 @@ async function TargetList({ filters }: { filters: Filters }) {
         </>
       )}
 
-      {/* Pushes the account footer to the bottom on short lists. */}
-      <div className="flex-1" />
-      <footer className="mt-16 flex flex-col gap-4 border-t border-rule pt-6">
-        <p className="text-base text-muted">
-          Signed in as <Email address={auth.claims.email ?? ""} />
-        </p>
-        <SignOutButton />
-      </footer>
     </>
   );
 }
@@ -346,17 +331,3 @@ function FilterBar({ filters, hiddenContacted }: { filters: Filters; hiddenConta
 // Keeps the address in one piece and moves it to its own line when it fits.
 // If it is wider than the screen it breaks before the "@", and only breaks
 // inside a part when that part alone is wider than the screen.
-function Email({ address }: { address: string }) {
-  const at = address.lastIndexOf("@");
-  const part = "inline-block max-w-full wrap-anywhere";
-  if (at <= 0) {
-    return <span className={`font-semibold text-foreground ${part}`}>{address}</span>;
-  }
-  return (
-    <span className={`font-semibold text-foreground ${part}`}>
-      <span className={part}>{address.slice(0, at)}</span>
-      <wbr />
-      <span className={part}>{address.slice(at)}</span>
-    </span>
-  );
-}

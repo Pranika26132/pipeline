@@ -358,6 +358,12 @@ Known limits:
   - source URL matching was too strict (scheme, www);
   - SPEC was missing the Find section.
 - **Note:** 120 s needs Vercel Fluid compute; the preview build confirms whether the project allows it.
+## Finished (branch `fix/sign-out`, 2026-10-18)
+- **Sign out** moved from the bottom of `/` to the bottom of `/profile`, below Save, under "Signed in as <email>". It's the only Sign out. It goes to `/login`, and signed-out pages redirect there.
+- **One `TopBar`** (`app/top-bar.tsx`) on every signed-in page (`/`, `/add`, `/company/[id]`, its not-found page, `/profile`): "Back to your list" on the left (except on `/`), "Profile" in the top-right corner (marked current on `/profile`). The home page's top padding now matches the other pages, so Profile sits in the same spot everywhere.
+- **Tested at 390 px** in headless Chrome, with a throwaway account (deleted afterwards):
+  - no sideways scrolling on `/`, `/add`, a company page or `/profile`;
+  - tapping Sign out landed on `/login`, and `/profile` afterwards redirected to `/login`.
 
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
