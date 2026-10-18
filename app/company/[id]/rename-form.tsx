@@ -4,8 +4,8 @@ import { useActionState } from "react";
 
 import { renameCompany, type RenameState } from "./actions";
 
-// Shown when the company's name is just its website ("turbo.ai"): drafts
-// and the list use this name.
+// Optional: change the name Pipeline uses for the company in the list and
+// in drafts. Closed by default; nothing waits on it.
 export function RenameForm({ companyId, current }: { companyId: string; current: string }) {
   const [state, action, pending] = useActionState<RenameState, FormData>(async (prev, formData) => {
     try {
@@ -15,10 +15,14 @@ export function RenameForm({ companyId, current }: { companyId: string; current:
     }
   }, {});
   return (
-    <form action={action} className="mt-4 flex flex-col gap-3 rounded-md border border-rule p-4">
+    <details className="group mt-1" open={!!state.error}>
+      <summary className="-ml-2 flex min-h-12 w-fit cursor-pointer list-none items-center px-2 text-base font-medium underline underline-offset-4 [&::-webkit-details-marker]:hidden">
+        Edit name
+      </summary>
+    <form action={action} className="mt-2 flex flex-col gap-3 rounded-md border border-rule p-4">
       <label className="flex flex-col gap-2">
         <span className="text-base font-medium">Company name</span>
-        <span className="text-sm text-muted">This is saved as its website. Drafts use the name, so set it the way the company writes it.</span>
+        <span className="text-sm text-muted">Used in your list and in drafts.</span>
         <input
           name="name"
           defaultValue={current}
@@ -43,5 +47,6 @@ export function RenameForm({ companyId, current }: { companyId: string; current:
         {pending ? "Saving…" : "Save name"}
       </button>
     </form>
+    </details>
   );
 }

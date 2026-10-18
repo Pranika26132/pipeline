@@ -14,6 +14,7 @@ import {
   type Filters,
   type Status,
 } from "@/lib/list-filters";
+import { displayName } from "@/lib/domain";
 import { isProfileEmpty } from "@/lib/profile";
 import type { Factor, Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
@@ -198,7 +199,7 @@ async function TargetList({ filters }: { filters: Filters }) {
                     className="-mx-2 grid min-h-16 grid-cols-[1fr_auto] items-center gap-x-4 rounded-md px-2 py-3 hover:bg-field focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
                   >
                     <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="text-lg font-semibold wrap-anywhere">{c.name}</span>
+                      <span className="text-lg font-semibold wrap-anywhere">{displayName(c.name, c.domain)}</span>
                       {c.reasons[0] ? (
                         <span className="text-base text-muted wrap-anywhere">{c.reasons[0].text}</span>
                       ) : (

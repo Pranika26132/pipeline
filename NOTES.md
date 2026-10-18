@@ -279,6 +279,11 @@ Known limits:
   - Watch: one draft said "a small team like yours", which isn't from a fact.
 - **Why Turbo AI scored 0:** the user's profile has "Hiring for a role I want" set to "Doesn't matter" (`weight_open_role = 0`). The matching itself works.
 
+## Finished (branch `fix/draft-company-name`, 2026-10-18)
+- Drafts never wait on the company name. They use the name the company's pages state (found on lookup); otherwise `nameFromDomain` makes a readable one: drop the ending and capitalize words, with ".ai" said as "AI" ("oxide.computer" → "Oxide", "turbo.ai" → "Turbo AI", "acme-labs.com" → "Acme Labs"). `displayName` is used in the draft route, the company page heading and the list.
+- "Edit name" on the company page is an optional, closed control instead of a required box.
+- Retest: a draft for a company saved as "oxide.computer", with no name set, worked straight away. It said "Oxide" throughout and was 88 words.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
