@@ -16,8 +16,10 @@ const UNREADABLE = "UNREADABLE";
 
 // What's wrong with an upload, in plain words, or null when it's a PDF within the limit.
 export function checkUpload(file: { name: string; type: string; size: number }, head: Uint8Array): string | null {
+  // Some phone file pickers send "application/octet-stream" for a PDF; the
+  // name or the type is enough here, and the header check below decides.
   const pdfName = /\.pdf$/i.test(file.name);
-  const pdfType = file.type === "application/pdf" || (file.type === "" && pdfName);
+  const pdfType = file.type === "application/pdf" || pdfName;
   if (!pdfType) return "That file isn't a PDF. Upload your resume as a PDF, or paste it.";
   if (file.size === 0) return "That file is empty.";
   if (file.size > RESUME_MAX_BYTES) {

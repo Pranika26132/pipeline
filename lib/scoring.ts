@@ -305,13 +305,13 @@ export function roleMatches(target: string, title: string): boolean {
   return !!words && new RegExp(`(^|[^\\p{L}\\p{N}])${words}($|[^\\p{L}\\p{N}])`, "iu").test(title);
 }
 
-type Role = { title: string; location: string | null; source_url: string };
+type Role = { title: string; location: string | null; details?: string | null; source_url: string };
 
-// Once Claude has checked fit against the current profile, only roles it
-// says fit count, with its reason. Before that (never checked, or the
-// profile changed since), titles matching a target role count, except
-// senior titles and roles whose dates have passed, and the reason says the
-// fit wasn't checked.
+// Once Claude has checked fit against the current profile, roles it says
+// fit count, with its reason. Roles without a current verdict (never
+// checked, the profile changed since, or a later lookup found them) count
+// when their title matches a target role, except senior titles and roles
+// whose dates have passed, and the reason says the fit wasn't checked.
 function roleReason(company: ScoreInput["company"], profile: ScoreInput["profile"], today: Date) {
   const targets = profile.role_targets;
   if (!Array.isArray(company.open_roles) || targets.length === 0) return null;
@@ -322,15 +322,18 @@ function roleReason(company: ScoreInput["company"], profile: ScoreInput["profile
   const pick = (list: Role[]) => list.find((r) => /\bintern(ship)?s?\b/i.test(r.title)) ?? list[0];
 
   const fits = currentFits(company.role_fit, fitKey(profile));
-  if (fits) {
-    const fitting = roles.filter((r) => fitFor(fits, r)?.verdict === "fits");
-    if (fitting.length === 0) return null;
+  const fitting = roles.filter((r) => fitFor(fits, r)?.verdict === "fits");
+  if (fitting.length > 0) {
     const best = pick(fitting);
     return { text: `Hiring: ${best.title}${more(fitting.length - 1, "role that fits", "roles that fit")}. ${fitFor(fits, best)!.reason}`, source_url: best.source_url };
   }
 
   const matching = roles.filter(
-    (r) => targets.some((t) => roleMatches(t, r.title)) && roleTiming(r.title, today) !== "past" && !isSeniorTitle(r.title),
+    (r) =>
+      !fitFor(fits, r) &&
+      targets.some((t) => roleMatches(t, r.title)) &&
+      roleTiming(r.title, today) !== "past" &&
+      !isSeniorTitle(r.title),
   );
   if (matching.length === 0) return null;
   const best = pick(matching);

@@ -160,7 +160,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   // Role fit is checked in the same run when there's time left; otherwise
   // the company page offers "Check fit". A failure is a note, not an error:
   // the lookup itself worked.
-  let roleFit = {};
+  let roleFit: { role_fit?: unknown } = {};
   const fitProfile = await loadFitProfile(supabase);
   if ("error" in fitProfile) notes.push(`Role fit wasn't checked. ${fitProfile.error}`);
   else if (roles.length > 0 && canCheckFit(fitProfile.profile)) {
@@ -172,6 +172,9 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       else roleFit = { role_fit: judged.record };
     }
   }
+  // New roles without new verdicts: the old verdicts no longer describe this
+  // list, so they're dropped and scoring matches titles until Check fit.
+  if (!("role_fit" in roleFit) && JSON.stringify(roles) !== JSON.stringify(oldRoles)) roleFit = { role_fit: null };
 
   // People first, then the company facts with a new facts_version: a score
   // computed from the old facts (say, by a profile save running now) is then

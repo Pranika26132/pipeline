@@ -148,6 +148,8 @@ describe("About me and role fit in drafts", () => {
     const me = draftFacts({ ...input, profile }).filter((f) => f.kind === "me").map((f) => f.text);
     expect(me).toContain("I'm studying BS in Computer Science, class of 2028");
     expect(me.some((t) => t.startsWith("My resume") && t.includes("Rust"))).toBe(true);
+    const degreeOnly = draftFacts({ ...input, profile: { ...profile, major: null, grad_year: null } }).filter((f) => f.kind === "me");
+    expect(degreeOnly.map((f) => f.text)).toContain("My degree: BS");
   });
 
   it("allows numbers from the resume in a draft", () => {

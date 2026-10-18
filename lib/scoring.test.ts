@@ -360,3 +360,41 @@ describe("role fit in scoring", () => {
     expect(result.reasons[0].text).toBe("Hiring: Software Engineering Intern and 1 more matching role (fit not checked yet)");
   });
 });
+
+describe("role fit with roles found after the check", () => {
+  it("counts an unjudged role by title, labelled, next to judged ones that don't fit", () => {
+    const judged = { title: "Senior Software Engineer", location: null, source_url: CAREERS };
+    const result = scoreCompany({
+      profile,
+      company: {
+        ...emptyCompany,
+        open_roles: [judged, { title: "Software Engineering Intern", location: null, source_url: CAREERS }],
+        role_fit: { key: fitKey(profile), checked_at: "x", roles: [{ ...judged, verdict: "no_fit", reason: "Senior." }] },
+      },
+      contacts: [],
+    });
+    expect(result.reasons[0].text).toBe("Hiring: Software Engineering Intern (fit not checked yet)");
+  });
+
+  it("tells apart two listings with the same title by location", () => {
+    const a = { title: "SWE Intern", location: "NYC", source_url: CAREERS };
+    const b = { title: "SWE Intern", location: "Remote", source_url: CAREERS };
+    const result = scoreCompany({
+      profile,
+      company: {
+        ...emptyCompany,
+        open_roles: [a, b],
+        role_fit: {
+          key: fitKey(profile),
+          checked_at: "x",
+          roles: [
+            { ...a, verdict: "no_fit", reason: "On-site only for seniors." },
+            { ...b, verdict: "fits", reason: "Remote internship; fits." },
+          ],
+        },
+      },
+      contacts: [],
+    });
+    expect(result.reasons[0].text).toBe("Hiring: SWE Intern. Remote internship; fits.");
+  });
+});

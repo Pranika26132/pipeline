@@ -135,10 +135,11 @@ export function draftFacts({ company, contact, profile, today }: DraftInput): Dr
 
   if (profile?.school) add({ kind: "me", text: `I go to ${profile.school}` });
   if (profile?.hometown) add({ kind: "me", text: `I'm from ${profile.hometown}` });
-  const study = [profile?.degree?.trim(), profile?.major?.trim()].filter(Boolean).join(" in ");
-  if (study || profile?.grad_year) {
-    add({ kind: "me", text: `I'm studying${study ? ` ${study}` : ""}${profile?.grad_year ? `, class of ${profile.grad_year}` : ""}` });
-  }
+  const degree = profile?.degree?.trim();
+  const major = profile?.major?.trim();
+  const year = profile?.grad_year ? `class of ${profile.grad_year}` : null;
+  const study = major ? `I'm studying ${degree ? `${degree} in ` : ""}${major}` : degree ? `My degree: ${degree}` : null;
+  if (study || year) add({ kind: "me", text: [study, year].filter(Boolean).join(", ") });
   if (profile?.resume?.trim()) {
     add({
       kind: "me",

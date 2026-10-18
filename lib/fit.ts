@@ -11,7 +11,16 @@ import { roleTiming } from "./roles";
 const MODEL = "claude-haiku-5-5";
 
 export type FitVerdict = "fits" | "no_fit" | "unclear" | "past";
-export type RoleFit = { title: string; source_url: string; verdict: FitVerdict; reason: string };
+// `location` and `details` are kept so a verdict only applies to the same
+// listing: two rows with one title, or a listing whose text changed, are told apart.
+export type RoleFit = {
+  title: string;
+  source_url: string;
+  location?: string | null;
+  details?: string | null;
+  verdict: FitVerdict;
+  reason: string;
+};
 export type RoleFitRecord = { key: string; checked_at: string; roles: RoleFit[] };
 export type FitProfile = {
   role_targets: string[];
@@ -73,9 +82,21 @@ export function currentFits(roleFit: unknown, key: string): RoleFit[] | null {
   );
 }
 
-// The verdict saved for one role, matched on title and page.
-export function fitFor(fits: RoleFit[] | null, role: { title: string; source_url: string }): RoleFit | null {
-  return fits?.find((f) => f.title === role.title && f.source_url === role.source_url) ?? null;
+// The verdict saved for one role: same title, page, location and excerpt.
+// Null when that listing wasn't judged (say, a lookup found it afterwards).
+export function fitFor(
+  fits: RoleFit[] | null,
+  role: { title: string; source_url: string; location?: string | null; details?: string | null },
+): RoleFit | null {
+  return (
+    fits?.find(
+      (f) =>
+        f.title === role.title &&
+        f.source_url === role.source_url &&
+        (f.location ?? null) === (role.location ?? null) &&
+        (f.details ?? null) === (role.details ?? null),
+    ) ?? null
+  );
 }
 
 const SYSTEM = `You decide which job openings fit a student looking for internships. For each role, answer "fits", "no_fit" or "unclear", with a short reason.
@@ -115,7 +136,8 @@ const SCHEMA = {
   },
 };
 
-const MAX_ROLES = 25;
+// As many as a lookup saves (lib/enrich/extract.ts).
+const MAX_ROLES = 40;
 const RESUME_CHARS = 6000;
 
 // One model call for all of a company's roles. Past-dated and senior titles
@@ -129,10 +151,10 @@ export async function checkRoleFit(
 ): Promise<RoleFit[]> {
   const fixed = (r: FitRole): RoleFit | null => {
     if (roleTiming(r.title, today) === "past") {
-      return { title: r.title, source_url: r.source_url, verdict: "past", reason: "The dates in the title have passed, so it isn't open now." };
+      return { ...listing(r), verdict: "past", reason: "The dates in the title have passed, so it isn't open now." };
     }
     if (isSeniorTitle(r.title)) {
-      return { title: r.title, source_url: r.source_url, verdict: "no_fit", reason: "The title is a senior or experienced-hire level." };
+      return { ...listing(r), verdict: "no_fit", reason: "The title is a senior or experienced-hire level." };
     }
     return null;
   };
@@ -197,12 +219,15 @@ export function mergeVerdicts(list: FitRole[], decided: (RoleFit | null)[], answ
     if (decided[i]) return decided[i]!;
     const a = byIndex.get(i);
     return {
-      title: r.title,
-      source_url: r.source_url,
+      ...listing(r),
       verdict: a?.verdict ?? "unclear",
       reason: a?.reason ?? "Couldn't be judged; check the listing yourself.",
     };
   });
+}
+
+function listing(r: FitRole) {
+  return { title: r.title, source_url: r.source_url, location: r.location ?? null, details: r.details ?? null };
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {

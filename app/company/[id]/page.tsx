@@ -87,12 +87,15 @@ async function Company({ id }: { id: string }) {
   const roles = (Array.isArray(company.open_roles) ? company.open_roles : []) as {
     title: string;
     location: string | null;
+    details?: string | null;
     source_url: string;
   }[];
   // Fit verdicts count only while they match the current profile.
   const profile = profileResult.data;
   const fits = profile ? currentFits(company.role_fit, fitKey(profile)) : null;
   const staleFit = !fits && !!company.role_fit;
+  // Checked, but some roles have no verdict (none should after a lookup; kept as a guard).
+  const unjudged = fits ? roles.filter((r) => !fitFor(fits, r)).length : 0;
   const today = new Date();
 
   return (
@@ -221,7 +224,9 @@ async function Company({ id }: { id: string }) {
             <p className="mt-2 text-base text-muted">
               {!canCheckFit(profile)
                 ? "Add the internship roles you want on your profile to check which of these fit you."
-                : fits
+                : fits && unjudged > 0
+                  ? `Checked against your profile, but ${unjudged} ${unjudged === 1 ? "role wasn’t" : "roles weren’t"}; until you check again, those count when the title matches.`
+                  : fits
                   ? "Checked against your profile. Only roles that fit count toward the score."
                   : staleFit
                     ? "Your profile changed since fit was checked, so the score matches role titles for now."

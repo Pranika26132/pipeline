@@ -9,6 +9,8 @@ describe("checkUpload", () => {
     expect(checkUpload({ name: "resume.pdf", type: "application/pdf", size: 1000 }, PDF)).toBeNull();
     // Some browsers send no type; the name and the bytes decide.
     expect(checkUpload({ name: "resume.PDF", type: "", size: 1000 }, PDF)).toBeNull();
+    // Some phone pickers send a generic type.
+    expect(checkUpload({ name: "resume.pdf", type: "application/octet-stream", size: 1000 }, PDF)).toBeNull();
   });
   it("says what's wrong: type, size, empty, fake PDF", () => {
     expect(checkUpload({ name: "resume.docx", type: "application/msword", size: 1000 }, PDF)).toMatch(/isn't a PDF/);

@@ -308,6 +308,24 @@ Known limits:
   - impossible dates reached Postgres.
 - **Known (product):** contacted companies are hidden by default, so a due follow-up only shows with the toggle or the Sent chip. A "follow-ups due" link could help later.
 
+## Finished (branch `feature/fit`, 2026-10-18; stacked on `feature/status`)
+- **About me** on /profile: class year, degree, major, and a "Your resume" section (paste, or "Upload a PDF" that fills the box for review). `/api/profile/resume` checks origin, session, key, size (4 MB: Vercel's body cap is 4.5 MB, so 5 MB uploads couldn't reach the route), type and the `%PDF-` header, then asks Haiku to copy the text. The PDF is never stored; the text is saved with the profile.
+- **Role fit:** `lib/fit.ts` (prompt, schema, verdict merge, `fitKey`), `lib/role-fit-run.ts`, `/api/companies/[id]/fit`. The lookup also runs it when at least 8 s are left. Saved as `companies.role_fit` `{key, checked_at, roles[]}` with a facts_version bump (compare-and-set), so older scores are refused.
+  - The extraction now also returns a `details` excerpt per role, kept only when copied from the cited page.
+  - Scoring counts only "fits" for the current `fitKey`; otherwise it matches titles, minus senior and past-dated ones, labelled "(fit not checked yet)".
+  - In the schema the reason comes before the verdict: with the verdict first, Haiku once returned "no_fit" with a reason saying it fits.
+- **Drafts:** a "me" fact with degree, major and class year, and one with the resume (first 5,000 characters, "use at most one line"). Roles judged "Doesn't fit" are dropped.
+- **Migration:** `20261018150931_profile_about_me_and_role_fit.sql` (profile columns with length and range checks, plus `companies.role_fit`). No new policies: the existing profiles and companies policies cover the columns.
+- **Tested by script** (throwaway user, deleted): a .txt file and a renamed .txt were rejected; a real PDF came back as clean text. Five roles came out as follows: the 2027 SWE intern "fits" (score reason quotes it), the senior role and the PhD-only role "doesn't fit", "Software Engineer" (no level) "unclear", and Summer 2026 "dates passed". The draft used the resume line ("built a Rust CLI … 40 of my classmates use it").
+- **Fresh-context review:** races, secrets, injection and RLS were fine. Fixed:
+  - a lookup that found new roles but couldn't re-check fit kept the old verdicts, so the new roles silently didn't count. A lookup now clears stale verdicts when the roles changed, and scoring counts any unjudged role by title, labelled;
+  - roles after the 25th were never judged (now 40, matching extraction);
+  - two listings with one title shared a verdict (now matched on title, page, location and excerpt);
+  - phone pickers that send `application/octet-stream` were refused (the `%PDF-` header decides now);
+  - "I'm studying BS" with no major.
+  - Not done: there's no cooldown on Check fit or the upload; repeat clicks only spend the user's own key budget.
+- **Note:** the dev server running since Oct 17 kept old `lib/scoring.ts` in its server bundle after the branch switch; restarting it fixed it.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
