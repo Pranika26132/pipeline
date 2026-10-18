@@ -2,10 +2,13 @@
 // may use, the checks every draft must pass, and the Gmail compose link.
 // The app never sends anything.
 
+import { currentFits, fitFor, fitKey } from "./fit";
 import { roleTiming } from "./roles";
 import type { Reason } from "./scoring";
 
 export const MAX_WORDS = 120;
+// How much of the resume a draft sees.
+const RESUME_CHARS = 5000;
 
 // Phrases that make a cold email read as generic (SPEC.md, CLAUDE.md).
 export const STOCK_PHRASES = [
@@ -71,9 +74,19 @@ export type DraftInput = {
     open_roles: unknown;
     score_reasons: unknown;
     field_sources: unknown;
+    role_fit?: unknown;
   };
   contact: { name: string; title: string | null; school: string | null; hometown: string | null; schoolCounts: boolean; hometownCounts: boolean } | null;
-  profile: { school: string | null; hometown: string | null; interests: string[]; role_targets: string[] } | null;
+  profile: {
+    school: string | null;
+    hometown: string | null;
+    interests: string[];
+    role_targets: string[];
+    grad_year?: number | null;
+    degree?: string | null;
+    major?: string | null;
+    resume?: string | null;
+  } | null;
   // Roles whose dates are before this are treated as past.
   today: Date;
 };
@@ -88,7 +101,12 @@ export function draftFacts({ company, contact, profile, today }: DraftInput): Dr
 
   if (company.summary) add({ kind: "company", hook: "product", text: `What ${company.name} builds: ${company.summary}`, source: sources.summary });
   const roles = (Array.isArray(company.open_roles) ? company.open_roles : []) as { title?: unknown; location?: unknown; source_url?: unknown }[];
-  for (const r of roles.slice(0, 5)) {
+  // Roles Claude judged not to fit this profile aren't offered as hooks.
+  const fits = profile ? currentFits(company.role_fit, fitKey(profile)) : null;
+  const usable = roles.filter(
+    (r) => typeof r.title !== "string" || fitFor(fits, { title: r.title, source_url: String(r.source_url) })?.verdict !== "no_fit",
+  );
+  for (const r of usable.slice(0, 5)) {
     if (typeof r.title !== "string") continue;
     const where = typeof r.location === "string" && r.location ? ` (${r.location})` : "";
     const source = typeof r.source_url === "string" ? r.source_url : null;
@@ -117,6 +135,16 @@ export function draftFacts({ company, contact, profile, today }: DraftInput): Dr
 
   if (profile?.school) add({ kind: "me", text: `I go to ${profile.school}` });
   if (profile?.hometown) add({ kind: "me", text: `I'm from ${profile.hometown}` });
+  const study = [profile?.degree?.trim(), profile?.major?.trim()].filter(Boolean).join(" in ");
+  if (study || profile?.grad_year) {
+    add({ kind: "me", text: `I'm studying${study ? ` ${study}` : ""}${profile?.grad_year ? `, class of ${profile.grad_year}` : ""}` });
+  }
+  if (profile?.resume?.trim()) {
+    add({
+      kind: "me",
+      text: `My resume (use at most one line from it, the one most related to this company, in one short sentence; add nothing it doesn't say): ${profile.resume.trim().slice(0, RESUME_CHARS)}`,
+    });
+  }
   if (profile?.role_targets.length) {
     add({ kind: "me", text: `Internships I'm looking for (name at most one that fits this company; never list them): ${profile.role_targets.join(", ")}` });
   }

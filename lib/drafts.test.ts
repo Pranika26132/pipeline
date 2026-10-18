@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { availableHooks, checkDraft, draftFacts, gmailComposeUrl, wordCount, type DraftInput } from "./drafts";
+import { fitKey } from "./fit";
 
 const input: DraftInput = {
   company: {
@@ -137,5 +138,34 @@ describe("gmailComposeUrl", () => {
     expect(new URL(gmailComposeUrl({ subject: "s", body: "b" })).searchParams.has("to")).toBe(false);
     // Spaces are %20, not "+".
     expect(gmailComposeUrl({ subject: "a b", body: "c d" })).toContain("su=a%20b");
+  });
+});
+
+describe("About me and role fit in drafts", () => {
+  const profile = { ...input.profile!, degree: "BS", major: "Computer Science", grad_year: 2028, resume: "Built a 3D printer slicer in Rust used by 40 students." };
+
+  it("adds the student's study and resume as their own facts", () => {
+    const me = draftFacts({ ...input, profile }).filter((f) => f.kind === "me").map((f) => f.text);
+    expect(me).toContain("I'm studying BS in Computer Science, class of 2028");
+    expect(me.some((t) => t.startsWith("My resume") && t.includes("Rust"))).toBe(true);
+  });
+
+  it("allows numbers from the resume in a draft", () => {
+    const f = draftFacts({ ...input, profile });
+    const draft = { subject: "Rust and note-taking", body: "Hi Rudy,\n\nI built a slicer in Rust that 40 students use. Would you have 15 minutes?\n\nBest," };
+    expect(checkDraft(draft, f, { company: f.find((x) => x.kind === "company")!.id })).toEqual([]);
+  });
+
+  it("leaves out a role Claude judged not to fit", () => {
+    const role_fit = {
+      key: fitKey(profile),
+      checked_at: "x",
+      roles: [{ title: "Software Engineering Intern", source_url: "https://turbo.ai/careers", verdict: "no_fit", reason: "PhD only." }],
+    };
+    const f = draftFacts({ ...input, profile, company: { ...input.company, role_fit } });
+    expect(f.some((x) => x.hook === "role")).toBe(false);
+    // Stale verdicts (profile changed) don't hide it.
+    const stale = draftFacts({ ...input, profile: { ...profile, major: "Math" }, company: { ...input.company, role_fit } });
+    expect(stale.some((x) => x.hook === "role")).toBe(true);
   });
 });
