@@ -27,7 +27,7 @@ const LIST_LIMIT = 500;
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pt-10 pb-10 sm:pt-16">
+    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pt-6 pb-10 sm:pt-12">
       <TopBar back={false} />
       <h1 className="mt-2 text-6xl font-bold tracking-[-0.05em]">Pipeline</h1>
       <Suspense fallback={<p className="mt-6 text-lg text-muted">Loading your companies…</p>}>

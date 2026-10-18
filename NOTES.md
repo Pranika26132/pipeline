@@ -326,6 +326,13 @@ Known limits:
   - Not done: there's no cooldown on Check fit or the upload; repeat clicks only spend the user's own key budget.
 - **Note:** the dev server running since Oct 17 kept old `lib/scoring.ts` in its server bundle after the branch switch; restarting it fixed it.
 
+## Finished (branch `fix/sign-out`, 2026-10-18)
+- **Sign out** moved from the bottom of `/` to the bottom of `/profile`, below Save, under "Signed in as <email>". It's the only Sign out. It goes to `/login`, and signed-out pages redirect there.
+- **One `TopBar`** (`app/top-bar.tsx`) on every signed-in page (`/`, `/add`, `/company/[id]`, its not-found page, `/profile`): "Back to your list" on the left (except on `/`), "Profile" in the top-right corner (marked current on `/profile`). The home page's top padding now matches the other pages, so Profile sits in the same spot everywhere.
+- **Tested at 390 px** in headless Chrome, with a throwaway account (deleted afterwards):
+  - no sideways scrolling on `/`, `/add`, a company page or `/profile`;
+  - tapping Sign out landed on `/login`, and `/profile` afterwards redirected to `/login`.
+
 ## Decisions
 - Supabase tables with RLS go on `setup/database`. The Vercel deploy was done on main in step 8 (live at pipeline-three-delta.vercel.app).
 - Confirm email is off in Supabase, so a new sign-up is logged in directly. Sign-up keeps the neutral message for an existing email, even though it differs from a new sign-up's response.
