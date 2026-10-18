@@ -7,6 +7,7 @@ import { displayName } from "@/lib/domain";
 import { availableHooks, draftFacts, MAX_WORDS } from "@/lib/drafts";
 import { canCheckFit, currentFits, fitFor, fitKey, VERDICT_LABELS, type FitVerdict } from "@/lib/fit";
 import { roleTiming } from "@/lib/roles";
+import { readLocations } from "@/lib/locations";
 import { redactSecrets } from "@/lib/redact";
 import type { Reason } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/server";
@@ -50,7 +51,7 @@ async function Company({ id }: { id: string }) {
   const [companyResult, contactsResult, draftResult, profileResult] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons, connection, connection_source_url, role_fit")
+      .select("id, name, url, domain, summary, stage, size, source, needs_manual_info, created_at, field_sources, open_roles, enriched_at, enrich_error, score, score_reasons, connection, connection_source_url, role_fit, locations")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -199,6 +200,20 @@ async function Company({ id }: { id: string }) {
             <Fact term="Tagged">
               {company.connection} <span className="text-muted">(from your list)</span>{" "}
               <SourceLink url={company.connection_source_url} />
+            </Fact>
+          )}
+          {readLocations(company.locations).length > 0 && (
+            <Fact term="Locations">
+              <ul className="flex flex-col gap-2">
+                {readLocations(company.locations).map((l, i) => (
+                  <li key={i} className="flex flex-col">
+                    <span>
+                      {l.kind === "office" ? "Office" : "Role"} in {l.value} <SourceLink url={l.source_url} />
+                    </span>
+                    {l.quote && <q className="text-base text-muted">{l.quote}</q>}
+                  </li>
+                ))}
+              </ul>
             </Fact>
           )}
           <Fact term="Added on">

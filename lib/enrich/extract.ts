@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+import type { CompanyLocation } from "../locations";
 import type { PageText } from "./pages";
 
 // A current small, cheap model is enough for extraction from a few pages.
@@ -19,6 +20,7 @@ Rules:
 - stage: funding stage or accelerator batch only if stated (for example "Seed", "Series A", "YC W24"). size: headcount only if stated. Otherwise null.
 - open_roles: job openings listed on the pages, with title as written and location if stated. details: one short excerpt copied exactly from the listing that states the level, experience, degree or dates asked for (for example "Open to rising juniors and seniors" or "3+ years of experience"); null if the page states none.
 - people: founders and team members named on the pages, with title if stated.
+- offices: places the pages say the company is headquartered or has an office (a city with its state or country as written, for example "Minneapolis, Minnesota"), each with quote: the exact sentence stating it, copied character for character.
 - When nothing is stated, use null or an empty list.`;
 
 const nullableString = { type: ["string", "null"] };
@@ -26,7 +28,7 @@ const nullableString = { type: ["string", "null"] };
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["company_name", "summary", "stage", "size", "open_roles", "people"],
+  required: ["company_name", "summary", "stage", "size", "open_roles", "people", "offices"],
   properties: {
     // The company's name as its own pages write it ("Turbo AI").
     company_name: nullableString,
@@ -40,6 +42,15 @@ const SCHEMA = {
         additionalProperties: false,
         required: ["title", "location", "details", "source_url"],
         properties: { title: { type: "string" }, location: nullableString, details: nullableString, source_url: { type: "string" } },
+      },
+    },
+    offices: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["place", "quote", "source_url"],
+        properties: { place: { type: "string" }, quote: { type: "string" }, source_url: { type: "string" } },
       },
     },
     people: {
@@ -80,7 +91,16 @@ export type Person = {
   hometown: string | null;
   source_url: string;
 };
-export type Extraction = { companyName: string | null; summary: Fact; stage: Fact; size: Fact; open_roles: Role[]; people: Person[] };
+export type Extraction = {
+  companyName: string | null;
+  summary: Fact;
+  stage: Fact;
+  size: Fact;
+  open_roles: Role[];
+  people: Person[];
+  // Offices and HQ (quoted sentence) and role locations (seen on the page).
+  locations: CompanyLocation[];
+};
 
 // The model's reply wasn't usable JSON. Carries a message for the user.
 export class BadModelOutputError extends Error {}
@@ -182,6 +202,22 @@ function validate(raw: unknown, pages: PageText[]): Extraction {
     });
   }
 
+  // An office counts only when its sentence is on the cited page and names
+  // the place; a role's location only when the place appears on its page.
+  const locations: CompanyLocation[] = [];
+  for (const o of Array.isArray(raw.offices) ? raw.offices.slice(0, LIMITS.items) : []) {
+    if (!isObject(o) || !cited(o.source_url)) continue;
+    const place = str(o.place, LIMITS.short);
+    const quote = str(o.quote, 1000);
+    if (!place || !quote || !byUrl.get(o.source_url)!.includes(normalize(quote)) || !containsWords(normalize(quote), place)) continue;
+    locations.push({ value: place, quote, source_url: o.source_url, kind: "office", from: "lookup" });
+  }
+  for (const r of open_roles) {
+    if (r.location && onPage(r.location, r.source_url)) {
+      locations.push({ value: r.location, quote: null, source_url: r.source_url, kind: "role", from: "lookup" });
+    }
+  }
+
   // The name must appear on a page we read, so it isn't guessed.
   const name = str(raw.company_name, LIMITS.short);
   const companyName = name && pages.some((p) => containsWords(normalize(p.text), name)) ? name : null;
@@ -192,6 +228,7 @@ function validate(raw: unknown, pages: PageText[]): Extraction {
     size: toFact(raw.size, LIMITS.short),
     open_roles,
     people,
+    locations,
   };
 }
 
