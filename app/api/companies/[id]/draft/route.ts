@@ -77,8 +77,6 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
   if (profileResult.error) return fail(500, `Couldn't load your profile (${profileResult.error.message}).`);
 
   const company = companyResult.data;
-  const signature = profileResult.data?.full_name?.trim();
-  if (!signature) return fail(422, "Add your name in your profile first. Drafts are signed with it.");
   if (looksLikeDomain(company.name, company.domain)) {
     return fail(422, `Set the company's name first (it's saved as ${company.domain}). Drafts use the name.`);
   }
@@ -112,7 +110,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/companies/[
       facts,
       hook,
       samples: profile?.writing_samples ?? [],
-      signature,
+      signature: profile?.full_name ?? null,
     });
   } catch (e) {
     // Our own check messages say what was wrong; API errors use fixed text.
